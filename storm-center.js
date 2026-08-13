@@ -29,6 +29,7 @@ const CATEGORY_LABELS = Object.freeze({
 
 const elements = {
   app: document.querySelector(".weather-app"),
+  metaDescription: document.querySelector("#metaDescription"),
   brand: document.querySelector(".brand"),
   weatherButton: document.querySelector("#weatherViewButton"),
   stormButton: document.querySelector("#stormViewButton"),
@@ -220,6 +221,21 @@ window.addEventListener("beforeunload", () => {
 
 const VIEW_HASHES = Object.freeze({ storm: "#storm-center", "live-earth": "#live-earth" });
 
+const VIEW_META = Object.freeze({
+  weather: {
+    title: "Storm Chaser — Weather Dashboard",
+    description: "Real-time local weather, hourly and 3-day forecasts, sunrise/sunset, and moon phase from WeatherAPI.",
+  },
+  storm: {
+    title: "Storm Center — Storm Chaser",
+    description: "Live U.S. severe-weather alerts, interactive alert mapping, radar, and tropical cyclone tracking from NOAA/NWS/NHC.",
+  },
+  "live-earth": {
+    title: "Live Earth — Storm Chaser",
+    description: "A global map and feed of significant earthquakes, wildfires, volcanoes, floods, and tropical cyclones from official sources.",
+  },
+});
+
 function viewFromHash(hash) {
   const match = Object.entries(VIEW_HASHES).find(([, viewHash]) => viewHash === hash);
   return match ? match[0] : "weather";
@@ -242,11 +258,8 @@ function setView(view, updateHistory) {
   elements.weatherButton.setAttribute("aria-pressed", String(view === "weather"));
   elements.stormButton.setAttribute("aria-pressed", String(view === "storm"));
   elements.liveEarthButton.setAttribute("aria-pressed", String(view === "live-earth"));
-  document.title = view === "storm"
-    ? "Storm Center — Storm Chaser"
-    : view === "live-earth"
-      ? "Live Earth — Storm Chaser"
-      : "Storm Chaser — Weather Dashboard";
+  document.title = VIEW_META[view].title;
+  if (elements.metaDescription) elements.metaDescription.content = VIEW_META[view].description;
 
   if (updateHistory) {
     const url = `${window.location.pathname}${window.location.search}${VIEW_HASHES[view] || ""}`;

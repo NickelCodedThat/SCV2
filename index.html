@@ -4,8 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#17273b">
-    <meta name="description" content="A refined, real-time weather dashboard powered by WeatherAPI.">
+    <meta id="metaDescription" name="description" content="Storm Chaser — real-time weather, U.S. severe-weather alerts, radar, tropical tracking, and a global natural-event map, all from official sources.">
     <title>Storm Chaser — Weather Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239fd9ff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M3 12h18'/%3E%3Cpath d='M12 3a13.5 13.5 0 0 1 3.5 9 13.5 13.5 0 0 1-3.5 9 13.5 13.5 0 0 1-3.5-9A13.5 13.5 0 0 1 12 3Z'/%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -45,6 +46,8 @@
       <symbol id="icon-play" viewBox="0 0 24 24"><path d="M6 4v16l13-8Z"></path></symbol>
       <symbol id="icon-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"></rect><rect x="14" y="4" width="4" height="16" rx="1"></rect></symbol>
       <symbol id="icon-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3a13.5 13.5 0 0 1 3.5 9 13.5 13.5 0 0 1-3.5 9 13.5 13.5 0 0 1-3.5-9A13.5 13.5 0 0 1 12 3Z"></path></symbol>
+      <symbol id="icon-bookmark" viewBox="0 0 24 24"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"></path></symbol>
+      <symbol id="icon-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 10.5 6.8-3.9M8.6 13.5l6.8 3.9"></path></symbol>
     </svg>
 
     <div class="weather-app" data-weather="cloudy" data-time="day" data-view="weather">
@@ -434,7 +437,7 @@
           </div>
         </div>
 
-        <p class="storm-disclaimer">Alert information can change quickly. Follow instructions from local officials and the issuing National Weather Service office.</p>
+        <p class="storm-disclaimer">Storm Chaser aggregates official NOAA/NWS data and issues no warnings of its own. Alert information can change quickly — follow instructions from local officials and the issuing National Weather Service office.</p>
       </main>
 
       <main class="storm-center" id="live-earth" hidden>
@@ -463,6 +466,12 @@
             </div>
           </div>
 
+          <div class="search-form" role="search">
+            <label class="sr-only" for="liveEarthSearchInput">Search events by title, location, or category</label>
+            <svg class="search-form__icon" aria-hidden="true"><use href="#icon-search"></use></svg>
+            <input id="liveEarthSearchInput" class="search-form__input" type="search" placeholder="Search events, locations, or categories" autocomplete="off" spellcheck="false" enterkeyhint="search">
+          </div>
+
           <div class="filter-chips" id="liveEarthCategoryFilters" aria-label="Filter events by category">
             <button class="filter-chip is-active" type="button" data-category="all" aria-pressed="true">All</button>
             <button class="filter-chip" type="button" data-category="earthquake" aria-pressed="false">Earthquakes</button>
@@ -470,6 +479,7 @@
             <button class="filter-chip" type="button" data-category="volcano" aria-pressed="false">Volcanoes</button>
             <button class="filter-chip" type="button" data-category="flood" aria-pressed="false">Floods</button>
             <button class="filter-chip" type="button" data-category="cyclone" aria-pressed="false">Cyclones</button>
+            <button class="filter-chip" type="button" data-category="saved" aria-pressed="false">Saved</button>
           </div>
 
           <div class="filter-selects">
@@ -489,6 +499,13 @@
                 <option value="all">All active</option>
                 <option value="day">Past 24 hours</option>
                 <option value="week">Past 7 days</option>
+              </select>
+            </label>
+            <label>
+              <span>Sort</span>
+              <select id="liveEarthSortSelect">
+                <option value="recent">Most recent</option>
+                <option value="priority">Highest priority</option>
               </select>
             </label>
           </div>
@@ -561,7 +578,7 @@
           </section>
         </div>
 
-        <p class="storm-disclaimer">Event information is sourced from official providers and can change quickly or be revised. Not all data is real-time — check each event’s “updated” timestamp.</p>
+        <p class="storm-disclaimer">Storm Chaser aggregates third-party authoritative data (USGS, NASA EONET, GDACS, NOAA/NHC) and issues no official warnings of its own. Event information can change or be revised — not all data is real-time, so check each event’s “updated” timestamp, and follow official authorities during an emergency.</p>
       </main>
 
       <footer class="footer">
@@ -578,9 +595,17 @@
           <span class="severity-badge" id="alertDialogSeverity">Advisory</span>
           <p class="eyebrow" id="alertDialogEyebrow">Official NWS alert</p>
         </div>
-        <button class="icon-button" id="closeAlertDialog" type="button" aria-label="Close alert details">
-          <svg aria-hidden="true"><use href="#icon-x"></use></svg>
-        </button>
+        <div>
+          <button class="icon-button" id="dialogShareButton" type="button" aria-label="Copy link to this event" hidden>
+            <svg aria-hidden="true"><use href="#icon-share"></use></svg>
+          </button>
+          <button class="icon-button" id="dialogSaveButton" type="button" aria-label="Save event" aria-pressed="false" hidden>
+            <svg aria-hidden="true"><use href="#icon-bookmark"></use></svg>
+          </button>
+          <button class="icon-button" id="closeAlertDialog" type="button" aria-label="Close alert details">
+            <svg aria-hidden="true"><use href="#icon-x"></use></svg>
+          </button>
+        </div>
       </div>
       <div class="alert-dialog__body">
         <h2 id="alertDialogTitle">Alert details</h2>

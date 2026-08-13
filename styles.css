@@ -1657,6 +1657,12 @@ input:focus-visible {
   background: rgba(var(--accent-rgb), 0.09);
 }
 
+.icon-button[aria-pressed="true"] {
+  border-color: rgba(var(--accent-rgb), 0.4);
+  background: rgba(var(--accent-rgb), 0.14);
+  color: var(--accent);
+}
+
 .icon-button svg {
   width: 1rem;
   height: 1rem;
@@ -1739,6 +1745,7 @@ input:focus-visible {
 }
 
 .filter-chip {
+  flex-shrink: 0;
   min-height: 2.35rem;
   padding: 0 0.8rem;
   border: 1px solid rgba(255, 255, 255, 0.1);
