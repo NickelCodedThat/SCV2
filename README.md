@@ -2,10 +2,12 @@
 
 Storm Chaser is a weather intelligence dashboard: a local forecast, a U.S.
 severe-weather center, and a live global feed of significant natural events,
-all built from official public data sources with no backend of its own.
+all built from official public data sources. A single serverless endpoint keeps
+the WeatherAPI credential out of production browsers; all keyless providers
+remain direct client-side integrations.
 
-It's a static, no-build, vanilla JavaScript app — every screen is plain
-HTML/CSS/ES modules calling public APIs directly from the browser.
+It's a no-build, vanilla JavaScript app — every screen is plain HTML/CSS/ES
+modules, with one small Vercel function as the production WeatherAPI boundary.
 
 ## Core features
 
@@ -102,9 +104,9 @@ accounts and no server-side state.
 - Floods: [GDACS](https://www.gdacs.org/) (Global Disaster Alert and Coordination System)
 - Basemap: [OpenStreetMap](https://www.openstreetmap.org/); Live Earth's cluster-count labels use [MapLibre's public demo glyph service](https://demotiles.maplibre.org/) (non-critical — category markers render without it)
 
-All of the above are public, keyless government or institutional endpoints —
-Storm Chaser calls them directly from the browser, with no server-side
-proxy and no data of its own.
+With the exception of WeatherAPI, the sources above are public, keyless
+government or institutional endpoints that Storm Chaser calls directly from
+the browser. WeatherAPI requests use the serverless proxy described below.
 
 ## Reliability
 
@@ -167,9 +169,13 @@ in production. Instead, `/api/weather.js` — a small Vercel serverless
 function — holds the key server-side and proxies WeatherAPI requests;
 `script.js` automatically falls back to calling that route whenever no
 client-side key is configured. Set the key as a Vercel project environment
-variable named `WEATHERAPI_KEY` (Project Settings → Environment Variables) —
-it's read server-side only via `process.env` and is never sent to the
-browser. No further configuration or build step is required.
+variable named `WEATHER_API_KEY` (Project Settings → Environment Variables).
+Enable it for **Production** and for **Preview** if preview deployments should
+also have working weather data, save the setting, then redeploy so the new
+deployment receives it. The value is read server-side only via `process.env`
+and is never sent to the browser. The older `WEATHERAPI_KEY` spelling remains
+supported as a temporary compatibility alias, but `WEATHER_API_KEY` is the
+documented canonical name. No build step or `vercel.json` is required.
 
 ## Testing
 
