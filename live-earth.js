@@ -4,9 +4,13 @@ import { openEventDialog } from "./event-dialog.js";
 import { createElement, announce } from "./utils/dom.js";
 import { formatDateTime, capitalize, pluralize, relativeTimeLabel } from "./utils/format.js";
 import { DISPLAY_PRIORITY_LABELS } from "./models/global-event.js";
+import { matchesSearch, compareEvents } from "./utils/event-query.js";
+import { readParam, replaceLiveEarthUrl } from "./utils/url-state.js";
+import { getWatchlist, isSaved, saveEvent, removeEvent, findSavedEntry } from "./services/watchlist.js";
 
 const REFRESH_INTERVAL = 10 * 60 * 1000;
 const PAGE_SIZE = 24;
+const SEARCH_DEBOUNCE = 200;
 
 const CATEGORY_LABELS = Object.freeze({
   earthquake: "Earthquake",
@@ -15,6 +19,8 @@ const CATEGORY_LABELS = Object.freeze({
   flood: "Flood",
   cyclone: "Cyclone",
 });
+
+const REAL_CATEGORIES = Object.freeze(["earthquake", "wildfire", "volcano", "flood", "cyclone"]);
 
 const elements = {
   activeCount: document.querySelector("#liveEarthActiveCount"),
@@ -29,6 +35,8 @@ const elements = {
   categoryButtons: document.querySelectorAll("#liveEarthCategoryFilters .filter-chip"),
   priorityFilter: document.querySelector("#liveEarthPriorityFilter"),
   recencyFilter: document.querySelector("#liveEarthRecencyFilter"),
+  sortSelect: document.querySelector("#liveEarthSortSelect"),
+  searchInput: document.querySelector("#liveEarthSearchInput"),
   feed: document.querySelector("#liveEarthFeed"),
   resultCount: document.querySelector("#liveEarthResultCount"),
   emptyState: document.querySelector("#liveEarthEmptyState"),
@@ -56,21 +64,20 @@ const state = {
   category: "all",
   priority: "all",
   recency: "all",
+  sort: "recent",
+  search: "",
   visibleCount: PAGE_SIZE,
   selectedEventId: "",
+  urlRestored: false,
+  hasStaleLinkNotice: false,
 };
+
+let searchDebounceTimer = null;
 
 elements.categoryFilters.addEventListener("click", (event) => {
   const button = event.target.closest(".filter-chip");
   if (!button) return;
-
-  state.category = button.dataset.category;
-  elements.categoryButtons.forEach((candidate) => {
-    const active = candidate === button;
-    candidate.classList.toggle("is-active", active);
-    candidate.setAttribute("aria-pressed", String(active));
-  });
-  applyFilters();
+  setCategory(button.dataset.category);
 });
 
 elements.priorityFilter.addEventListener("change", () => {
@@ -81,6 +88,19 @@ elements.priorityFilter.addEventListener("change", () => {
 elements.recencyFilter.addEventListener("change", () => {
   state.recency = elements.recencyFilter.value;
   applyFilters();
+});
+
+elements.sortSelect.addEventListener("change", () => {
+  state.sort = elements.sortSelect.value;
+  applyFilters();
+});
+
+elements.searchInput.addEventListener("input", () => {
+  window.clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = window.setTimeout(() => {
+    state.search = elements.searchInput.value;
+    applyFilters();
+  }, SEARCH_DEBOUNCE);
 });
 
 elements.refreshButton.addEventListener("click", () => refreshEvents());
@@ -192,6 +212,11 @@ async function refreshEvents({ silent = false } = {}) {
     applyFilters();
     updateLiveStatus();
     announce(`Live Earth updated with ${state.events.length} tracked events.`);
+
+    if (!state.urlRestored) {
+      state.urlRestored = true;
+      restoreUrlState();
+    }
   } catch (error) {
     if (error.name === "AbortError") return;
 
@@ -223,20 +248,78 @@ function describeProviderIssues(providerCache) {
   return `${issues.join(", ")} temporarily unavailable — showing the last successful data for ${issues.length === 1 ? "that source" : "those sources"} where available.`;
 }
 
+function setCategory(category) {
+  state.category = category;
+  elements.categoryButtons.forEach((candidate) => {
+    const active = candidate.dataset.category === category;
+    candidate.classList.toggle("is-active", active);
+    candidate.setAttribute("aria-pressed", String(active));
+  });
+  // "saved" is a personal, local-only view — never written to a shareable URL.
+  replaceLiveEarthUrl({ category: REAL_CATEGORIES.includes(category) ? category : null });
+  applyFilters();
+}
+
 function applyFilters() {
+  clearStaleLinkNotice();
   state.visibleCount = PAGE_SIZE;
   const cutoff = recencyCutoff(state.recency);
+  const pool = state.category === "saved" ? getWatchlistEvents() : state.events;
 
-  state.filteredEvents = state.events.filter((event) => {
-    const matchesCategory = state.category === "all" || event.category === state.category;
-    const matchesPriority = state.priority === "all" || event.severity.displayPriority === state.priority;
-    const referenceTime = event.time.eventAt || event.time.updatedAt;
-    const matchesRecency = !cutoff || (referenceTime && referenceTime.getTime() >= cutoff);
-    return matchesCategory && matchesPriority && matchesRecency;
-  });
+  state.filteredEvents = pool
+    .filter((event) => {
+      const matchesCategory = state.category === "all" || state.category === "saved" || event.category === state.category;
+      const matchesPriority = state.priority === "all" || event.severity.displayPriority === state.priority;
+      const referenceTime = event.time.eventAt || event.time.updatedAt;
+      const matchesRecency = !cutoff || (referenceTime && referenceTime.getTime() >= cutoff);
+      const matchesQuery = matchesSearch(event, state.search);
+      return matchesCategory && matchesPriority && matchesRecency && matchesQuery;
+    })
+    .sort((a, b) => compareEvents(a, b, state.sort));
 
   renderFeed();
   updateMap();
+}
+
+/**
+ * Merges the saved watchlist with current live data: a saved event still in
+ * the feed uses the fresh live copy (isArchived: false); one that has
+ * dropped out is rebuilt from its compact snapshot (isArchived: true) so it
+ * can still render instead of silently vanishing.
+ */
+function getWatchlistEvents() {
+  return getWatchlist().map((entry) => {
+    const live = state.events.find((event) => event.id === entry.id);
+    return live ? { ...live, isArchived: false } : eventFromSnapshot(entry);
+  });
+}
+
+function eventFromSnapshot(entry) {
+  const snapshot = entry.snapshot || {};
+  return {
+    id: entry.id,
+    provider: entry.provider,
+    category: entry.category,
+    title: snapshot.title || "Saved event",
+    status: "archived",
+    position: snapshot.position || null,
+    region: { place: snapshot.place || "", countries: snapshot.countries || [] },
+    time: {
+      eventAt: snapshot.eventAt ? new Date(snapshot.eventAt) : null,
+      updatedAt: snapshot.updatedAt ? new Date(snapshot.updatedAt) : null,
+      fetchedAt: null,
+      closedAt: null,
+    },
+    severity: {
+      providerLevel: snapshot.providerLevel || null,
+      providerLabel: snapshot.providerLabel || null,
+      displayPriority: snapshot.displayPriority || "advisory",
+    },
+    details: { keyMeasurement: snapshot.keyMeasurement || "" },
+    source: { name: snapshot.sourceName || "", url: snapshot.sourceUrl || null },
+    isArchived: true,
+    savedAt: entry.savedAt,
+  };
 }
 
 function recencyCutoff(recency) {
@@ -261,8 +344,9 @@ function renderFeed() {
   elements.feed.hidden = false;
   elements.emptyState.hidden = true;
 
+  const savedIds = new Set(getWatchlist().map((entry) => entry.id));
   const fragment = document.createDocumentFragment();
-  state.filteredEvents.slice(0, state.visibleCount).forEach((event) => fragment.append(createEventCard(event)));
+  state.filteredEvents.slice(0, state.visibleCount).forEach((event) => fragment.append(createEventCard(event, savedIds)));
   elements.feed.append(fragment);
 
   const remaining = state.filteredEvents.length - state.visibleCount;
@@ -270,7 +354,7 @@ function renderFeed() {
   if (remaining > 0) elements.loadMore.textContent = `Load more events (${remaining} remaining)`;
 }
 
-function createEventCard(event) {
+function createEventCard(event, savedIds) {
   const level = event.severity.displayPriority;
   const article = createElement("article", `alert-card alert-card--${level}`);
   article.dataset.eventId = event.id;
@@ -294,6 +378,9 @@ function createEventCard(event) {
   const authority = createElement("span", "", event.source.name);
   const priorityLabel = createElement("span", "", DISPLAY_PRIORITY_LABELS[level] || "Informational");
   footer.append(authority, priorityLabel);
+  if (savedIds?.has(event.id)) {
+    footer.append(createElement("span", "", event.isArchived ? "Archived" : "Saved"));
+  }
 
   button.append(topLine, title, headline, area, footer);
   article.append(button);
@@ -302,6 +389,8 @@ function createEventCard(event) {
 
 function buildHeadline(event) {
   const details = event.details;
+
+  if (event.isArchived) return details?.keyMeasurement || "Archived — limited data available";
 
   if (event.category === "earthquake") {
     const parts = [];
@@ -329,15 +418,19 @@ function buildHeadline(event) {
 }
 
 function renderEmptyState() {
-  const filtered = state.category !== "all" || state.priority !== "all" || state.recency !== "all";
+  const filtered = state.category !== "all" || state.priority !== "all" || state.recency !== "all" || state.search.trim() !== "";
 
-  if (state.events.length === 0 && !state.loading) {
+  if (state.category === "saved") {
+    elements.emptyHeading.textContent = "No saved events yet";
+    elements.emptyText.textContent = "Open an event and select the bookmark icon to save it here.";
+    elements.clearFilters.hidden = !(state.priority !== "all" || state.recency !== "all" || state.search.trim() !== "");
+  } else if (state.events.length === 0 && !state.loading) {
     elements.emptyHeading.textContent = "No tracked events reported";
     elements.emptyText.textContent = "There are currently no significant events from any connected source.";
     elements.clearFilters.hidden = true;
   } else {
     elements.emptyHeading.textContent = "No matching events";
-    elements.emptyText.textContent = "Try changing a filter to view other tracked events.";
+    elements.emptyText.textContent = "Try changing a filter or search to view other tracked events.";
     elements.clearFilters.hidden = !filtered;
   }
 
@@ -364,17 +457,19 @@ function updateMap() {
 }
 
 function openLiveEarthEventDetails(event) {
+  clearStaleLinkNotice();
   state.selectedEventId = event.id;
   document.querySelectorAll(".alert-card").forEach((card) => {
     card.classList.toggle("is-selected", card.dataset.eventId === event.id);
   });
 
   state.map?.selectEvent(event);
+  replaceLiveEarthUrl({ event: event.id });
 
   const level = event.severity.displayPriority;
   openEventDialog({
     level,
-    eyebrow: `Official ${event.source.name} data`,
+    eyebrow: event.isArchived ? `Saved ${event.source.name || "event"}` : `Official ${event.source.name} data`,
     severityLabel: event.severity.providerLabel || DISPLAY_PRIORITY_LABELS[level] || "Informational",
     title: event.title,
     headline: buildHeadline(event),
@@ -382,10 +477,40 @@ function openLiveEarthEventDetails(event) {
     area: event.region.place || event.region.countries.join(", ") || "Location unavailable",
     descriptionHeading: "Summary",
     description: buildDescription(event),
-    authority: event.source.name,
+    authority: event.source.name || "Unknown source",
     sourceUrl: event.source.url,
     fields: buildDetailFields(event),
-  }, { onClose: clearLiveEarthSelection });
+  }, {
+    onClose: clearLiveEarthSelection,
+    isSaved: isSaved(event.id),
+    onSave: () => toggleSaved(event),
+    onShare: () => shareEvent(event),
+  });
+}
+
+function toggleSaved(event) {
+  const wasSaved = isSaved(event.id);
+  if (wasSaved) removeEvent(event.id); else saveEvent(event);
+
+  renderFeed();
+  if (state.category === "saved") applyFilters();
+  return !wasSaved;
+}
+
+async function shareEvent(event) {
+  replaceLiveEarthUrl({ event: event.id });
+  const url = window.location.href;
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+      announce("Link to this event copied to the clipboard.");
+      return;
+    }
+  } catch {
+    // fall through to the manual-copy announcement below
+  }
+  announce(`Copy this link to share the event: ${url}`);
 }
 
 function buildDescription(event) {
@@ -396,7 +521,24 @@ function buildDescription(event) {
 
 function buildDetailFields(event) {
   const details = event.details;
+
+  // The live/archived distinction always leads — a saved snapshot must
+  // never look like it's currently live.
+  const dataStatus = event.isArchived
+    ? `Archived — last known ${formatDateTime(event.time.updatedAt || event.time.eventAt)}`
+    : "Live";
+
+  if (event.isArchived) {
+    return [
+      ["Data status", dataStatus],
+      ["Category", CATEGORY_LABELS[event.category] || "Event"],
+      ["Key measurement", details?.keyMeasurement || "Unavailable"],
+      ["Last known time", formatDateTime(event.time.eventAt || event.time.updatedAt)],
+    ];
+  }
+
   const common = [
+    ["Data status", dataStatus],
     ["Category", CATEGORY_LABELS[event.category] || "Event"],
     ["Status", capitalize(event.status)],
     ["Event time", formatDateTime(event.time.eventAt)],
@@ -446,20 +588,57 @@ function clearLiveEarthSelection() {
   state.selectedEventId = "";
   document.querySelectorAll(".alert-card.is-selected").forEach((card) => card.classList.remove("is-selected"));
   state.map?.clearSelection();
+  replaceLiveEarthUrl({ event: null });
 }
 
 function clearLiveEarthFilters() {
-  state.category = "all";
   state.priority = "all";
   state.recency = "all";
+  state.search = "";
   elements.priorityFilter.value = "all";
   elements.recencyFilter.value = "all";
-  elements.categoryButtons.forEach((button) => {
-    const active = button.dataset.category === "all";
-    button.classList.toggle("is-active", active);
-    button.setAttribute("aria-pressed", String(active));
-  });
-  applyFilters();
+  elements.searchInput.value = "";
+  setCategory("all");
+}
+
+/**
+ * One-time (per page load) restore of ?event= and ?category= once the first
+ * batch of live data has arrived. A shared event id is resolved against
+ * live data first, then the local watchlist snapshot, and otherwise shown
+ * as a clear, non-fabricated "no longer available" message — never a blank
+ * screen or an invented result.
+ */
+function restoreUrlState() {
+  const categoryParam = readParam(window.location.search, "category");
+  if (categoryParam && REAL_CATEGORIES.includes(categoryParam)) setCategory(categoryParam);
+
+  const eventParam = readParam(window.location.search, "event");
+  if (!eventParam) return;
+
+  const liveMatch = state.events.find((event) => event.id === eventParam);
+  if (liveMatch) {
+    openLiveEarthEventDetails(liveMatch);
+    return;
+  }
+
+  const savedEntry = findSavedEntry(eventParam);
+  if (savedEntry) {
+    openLiveEarthEventDetails(eventFromSnapshot(savedEntry));
+    return;
+  }
+
+  showError("This event is no longer available in the current live feed.");
+  state.hasStaleLinkNotice = true;
+  replaceLiveEarthUrl({ event: null });
+}
+
+// The "shared link is stale" notice above is about one specific event, not
+// the live feed's health — so unlike a real provider outage, it should not
+// keep following the user once they've moved on to something else that
+// works (a new filter, search, or a different event they open successfully).
+function clearStaleLinkNotice() {
+  if (!state.hasStaleLinkNotice || describeProviderIssues(state.providerCache)) return;
+  hideError();
 }
 
 function setFeedLoading(isLoading) {
@@ -497,4 +676,5 @@ function showError(message) {
 
 function hideError() {
   elements.error.hidden = true;
+  state.hasStaleLinkNotice = false;
 }
