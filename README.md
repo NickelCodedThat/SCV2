@@ -14,6 +14,7 @@ national severe-weather center.
 - Alert categories, severity and state filters, and detailed event information
 - Live NOAA radar mosaic with a short playback loop of recent frames
 - Active tropical system tracking (Atlantic, Eastern & Central Pacific) from the National Hurricane Center, including forecast track, cone, and coastal watches/warnings where officially published
+- **Live Earth**: a global map and feed of significant natural events — earthquakes (USGS), wildfires and volcanic activity (NASA EONET), floods (GDACS), and tropical cyclones worldwide (NHC/CPHC + EONET/JTWC), with category/priority/recency filtering, map clustering, and full source attribution on every event
 - Responsive layouts for mobile, tablet, laptop, and desktop
 
 ## Technologies
@@ -23,6 +24,7 @@ national severe-weather center.
 - Vanilla JavaScript and ES modules
 - WeatherAPI
 - NOAA/National Weather Service API
+- USGS, NASA EONET, and GDACS APIs
 - MapLibre GL JS
 
 ## Local configuration
@@ -59,8 +61,11 @@ Open `http://127.0.0.1:4173` in a browser.
 - Local weather: [WeatherAPI](https://www.weatherapi.com/)
 - U.S. alerts: [NOAA/National Weather Service](https://www.weather.gov/documentation/services-web-api)
 - Radar: [NOAA/NWS nowCOAST](https://nowcoast.noaa.gov/) (NEXRAD/MRMS CONUS base reflectivity mosaic)
-- Tropical tracking: [National Hurricane Center](https://www.nhc.noaa.gov/) `CurrentStorms.json` and the [NOAA tropical MapServer](https://mapservices.weather.noaa.gov/tropical/rest/services/tropical/NHC_tropical_weather/MapServer) for official forecast/track geometry
-- Basemap: [OpenStreetMap](https://www.openstreetmap.org/)
+- Tropical tracking: [NOAA's tropical summary MapServer](https://mapservices.weather.noaa.gov/tropical/rest/services/tropical/NHC_tropical_weather_summary/MapServer) (National Hurricane Center / Central Pacific Hurricane Center data)
+- Earthquakes: [USGS Earthquake Hazards Program](https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php)
+- Wildfires, volcanoes & global cyclones: [NASA EONET](https://eonet.gsfc.nasa.gov/) (wildfire/volcano attribution passes through to the underlying agency, e.g. IRWIN, Smithsonian GVP, JTWC)
+- Floods: [GDACS](https://www.gdacs.org/) (Global Disaster Alert and Coordination System)
+- Basemap: [OpenStreetMap](https://www.openstreetmap.org/); LIVE EARTH's cluster-count labels use [MapLibre's public demo glyph service](https://demotiles.maplibre.org/) (non-critical — category markers render without it)
 
 All of the above are public, keyless government endpoints — Storm Chaser calls them directly from the browser, with no server-side proxy.
 

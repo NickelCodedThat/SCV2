@@ -1534,7 +1534,8 @@ input:focus-visible {
 }
 
 .dashboard[hidden],
-[data-view="storm"] #errorMessage {
+[data-view="storm"] #errorMessage,
+[data-view="live-earth"] #errorMessage {
   display: none;
 }
 

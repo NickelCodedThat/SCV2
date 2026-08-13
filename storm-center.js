@@ -4,6 +4,11 @@ import { fetchRadarFrames } from "./services/nws-radar.js";
 import { addRadarLayer, setRadarFrame } from "./map/radar-layer.js";
 import { fetchActiveStorms, fetchStormGeometry } from "./services/nhc-storms.js";
 import { addTropicalLayers, setTropicalData, setTropicalLayersVisibility } from "./map/tropical-layer.js";
+import { classificationToSeverityTier } from "./utils/hurricane-scale.js";
+import { openEventDialog } from "./event-dialog.js";
+import { createElement, createSvgUse, announce } from "./utils/dom.js";
+import { formatDateTime, capitalize, pluralize, compassFromDegrees } from "./utils/format.js";
+import { initializeLiveEarth, resizeLiveEarthMap, setLiveEarthActive } from "./live-earth.js";
 
 const REFRESH_INTERVAL = 5 * 60 * 1000;
 const RADAR_REFRESH_INTERVAL = 5 * 60 * 1000;
@@ -27,10 +32,13 @@ const elements = {
   brand: document.querySelector(".brand"),
   weatherButton: document.querySelector("#weatherViewButton"),
   stormButton: document.querySelector("#stormViewButton"),
+  liveEarthButton: document.querySelector("#liveEarthViewButton"),
   weatherDashboard: document.querySelector("#main-content"),
   stormCenter: document.querySelector("#storm-center"),
+  liveEarth: document.querySelector("#live-earth"),
   weatherAttribution: document.querySelector("#weatherAttribution"),
   stormAttribution: document.querySelector("#stormAttribution"),
+  liveEarthAttribution: document.querySelector("#liveEarthAttribution"),
   activeCount: document.querySelector("#activeAlertCount"),
   lastUpdated: document.querySelector("#stormLastUpdated"),
   refreshButton: document.querySelector("#refreshStormCenter"),
@@ -51,23 +59,6 @@ const elements = {
   mapContainer: document.querySelector("#stormMap"),
   mapState: document.querySelector("#stormMapState"),
   mappedCount: document.querySelector("#mappedAlertCount"),
-  dialog: document.querySelector("#alertDialog"),
-  dialogClose: document.querySelector("#closeAlertDialog"),
-  dialogSeverity: document.querySelector("#alertDialogSeverity"),
-  dialogTitle: document.querySelector("#alertDialogTitle"),
-  dialogHeadline: document.querySelector("#alertDialogHeadline"),
-  dialogMeta: document.querySelector("#alertDialogMeta"),
-  dialogArea: document.querySelector("#alertDialogArea"),
-  dialogDescription: document.querySelector("#alertDialogDescription"),
-  dialogInstruction: document.querySelector("#alertDialogInstruction"),
-  instructionSection: document.querySelector("#alertInstructionSection"),
-  dialogAuthority: document.querySelector("#alertDialogAuthority"),
-  dialogSource: document.querySelector("#alertDialogSource"),
-  dialogEyebrow: document.querySelector("#alertDialogEyebrow"),
-  dialogAreaHeading: document.querySelector("#alertDialogAreaHeading"),
-  dialogDescriptionHeading: document.querySelector("#alertDialogDescriptionHeading"),
-  dialogInstructionHeading: document.querySelector("#alertDialogInstructionHeading"),
-  liveRegion: document.querySelector("#liveRegion"),
 
   subviewTabs: document.querySelector("#stormSubviewTabs"),
   subviewButtons: document.querySelectorAll("#stormSubviewTabs .filter-chip"),
@@ -139,8 +130,9 @@ const state = {
 
 elements.weatherButton.addEventListener("click", () => setView("weather", true));
 elements.stormButton.addEventListener("click", () => setView("storm", true));
+elements.liveEarthButton.addEventListener("click", () => setView("live-earth", true));
 elements.brand.addEventListener("click", (event) => {
-  if (state.view === "storm") {
+  if (state.view !== "weather") {
     event.preventDefault();
     setView("weather", true);
   }
@@ -177,12 +169,6 @@ elements.loadMore.addEventListener("click", () => {
   renderAlertFeed();
 });
 
-elements.dialogClose.addEventListener("click", () => elements.dialog.close());
-elements.dialog.addEventListener("click", (event) => {
-  if (event.target === elements.dialog) elements.dialog.close();
-});
-elements.dialog.addEventListener("close", clearSelection);
-
 elements.subviewTabs.addEventListener("click", (event) => {
   const button = event.target.closest(".filter-chip");
   if (!button) return;
@@ -201,7 +187,7 @@ elements.radarTimeline.addEventListener("input", () => {
 });
 
 window.addEventListener("popstate", () => {
-  setView(window.location.hash === "#storm-center" ? "storm" : "weather", false);
+  setView(viewFromHash(window.location.hash), false);
 });
 
 document.addEventListener("visibilitychange", () => {
@@ -232,34 +218,50 @@ window.addEventListener("beforeunload", () => {
   state.map?.destroy();
 });
 
+const VIEW_HASHES = Object.freeze({ storm: "#storm-center", "live-earth": "#live-earth" });
+
+function viewFromHash(hash) {
+  const match = Object.entries(VIEW_HASHES).find(([, viewHash]) => viewHash === hash);
+  return match ? match[0] : "weather";
+}
+
 function setView(view, updateHistory) {
-  if (!["weather", "storm"].includes(view)) return;
+  if (!["weather", "storm", "live-earth"].includes(view)) return;
 
   state.view = view;
-  const stormIsActive = view === "storm";
   elements.app.dataset.view = view;
-  elements.weatherDashboard.hidden = stormIsActive;
-  elements.stormCenter.hidden = !stormIsActive;
-  elements.weatherAttribution.hidden = stormIsActive;
-  elements.stormAttribution.hidden = !stormIsActive;
-  elements.weatherButton.classList.toggle("is-active", !stormIsActive);
-  elements.stormButton.classList.toggle("is-active", stormIsActive);
-  elements.weatherButton.setAttribute("aria-pressed", String(!stormIsActive));
-  elements.stormButton.setAttribute("aria-pressed", String(stormIsActive));
-  document.title = stormIsActive
+  elements.weatherDashboard.hidden = view !== "weather";
+  elements.stormCenter.hidden = view !== "storm";
+  elements.liveEarth.hidden = view !== "live-earth";
+  elements.weatherAttribution.hidden = view !== "weather";
+  elements.stormAttribution.hidden = view !== "storm";
+  elements.liveEarthAttribution.hidden = view !== "live-earth";
+  elements.weatherButton.classList.toggle("is-active", view === "weather");
+  elements.stormButton.classList.toggle("is-active", view === "storm");
+  elements.liveEarthButton.classList.toggle("is-active", view === "live-earth");
+  elements.weatherButton.setAttribute("aria-pressed", String(view === "weather"));
+  elements.stormButton.setAttribute("aria-pressed", String(view === "storm"));
+  elements.liveEarthButton.setAttribute("aria-pressed", String(view === "live-earth"));
+  document.title = view === "storm"
     ? "Storm Center — Storm Chaser"
-    : "Storm Chaser — Weather Dashboard";
+    : view === "live-earth"
+      ? "Live Earth — Storm Chaser"
+      : "Storm Chaser — Weather Dashboard";
 
   if (updateHistory) {
-    const url = stormIsActive
-      ? `${window.location.pathname}${window.location.search}#storm-center`
-      : `${window.location.pathname}${window.location.search}`;
+    const url = `${window.location.pathname}${window.location.search}${VIEW_HASHES[view] || ""}`;
     window.history.pushState({ view }, "", url);
   }
 
-  if (stormIsActive) {
+  if (view === "storm") {
     initializeStormCenter();
     window.setTimeout(() => state.map?.resize(), 0);
+  }
+
+  setLiveEarthActive(view === "live-earth");
+  if (view === "live-earth") {
+    initializeLiveEarth();
+    window.setTimeout(() => resizeLiveEarthMap(), 0);
   }
 }
 
@@ -617,7 +619,7 @@ function renderTropicalFeed() {
 }
 
 function createStormCard(storm) {
-  const level = classificationToLevel(storm.classificationInfo);
+  const level = classificationToSeverityTier(storm.classificationInfo);
   const article = createElement("article", `alert-card alert-card--${level}`);
   article.dataset.stormId = storm.id;
   if (storm.id === state.tropical.selectedStormId) article.classList.add("is-selected");
@@ -662,18 +664,6 @@ function createStormCard(storm) {
   button.append(topLine, title, headline, area, footer);
   article.append(button);
   return article;
-}
-
-function classificationToLevel(classificationInfo) {
-  if (classificationInfo.code === "HU") return classificationInfo.isMajor ? "critical" : "severe";
-  if (classificationInfo.code === "TS" || classificationInfo.code === "STS") return "elevated";
-  return "advisory";
-}
-
-function compassFromDegrees(degrees) {
-  if (!Number.isFinite(degrees)) return "an unknown direction";
-  const directions = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
-  return directions[Math.round(degrees / 22.5) % 16];
 }
 
 function updateTropicalMap() {
@@ -869,32 +859,31 @@ function openAlertDetails(alert) {
 
   if (alert.hasGeometry) state.map?.selectAlert(alert);
 
-  elements.dialog.className = `alert-dialog alert-card--${alert.level}`;
-  elements.dialogEyebrow.textContent = "Official NWS alert";
-  elements.dialogSeverity.textContent = capitalize(alert.level);
-  elements.dialogTitle.textContent = alert.event;
-  elements.dialogHeadline.textContent = alert.headline;
-  elements.dialogAreaHeading.textContent = "Affected area";
-  elements.dialogArea.textContent = alert.area;
-  elements.dialogDescriptionHeading.textContent = "Description";
-  elements.dialogDescription.textContent = alert.description;
-  elements.dialogInstructionHeading.textContent = "Recommended action";
-  elements.dialogInstruction.textContent = alert.instruction;
-  elements.instructionSection.hidden = !alert.instruction;
-  elements.dialogAuthority.textContent = alert.authority;
-  elements.dialogSource.href = alert.sourceUrl;
-  renderDialogMeta([
-    ["Severity", alert.severity],
-    ["Urgency", alert.urgency],
-    ["Certainty", alert.certainty],
-    ["Expires", formatDateTime(alert.expires)],
-    ["Issued", formatDateTime(alert.sent)],
-    ["Status", alert.status],
-    ["Response", alert.response],
-    ["States", alert.states.join(", ") || "Multi-area"],
-  ]);
-
-  showDialog();
+  openEventDialog({
+    level: alert.level,
+    eyebrow: "Official NWS alert",
+    severityLabel: capitalize(alert.level),
+    title: alert.event,
+    headline: alert.headline,
+    areaHeading: "Affected area",
+    area: alert.area,
+    descriptionHeading: "Description",
+    description: alert.description,
+    instructionHeading: "Recommended action",
+    instruction: alert.instruction,
+    authority: alert.authority,
+    sourceUrl: alert.sourceUrl,
+    fields: [
+      ["Severity", alert.severity],
+      ["Urgency", alert.urgency],
+      ["Certainty", alert.certainty],
+      ["Expires", formatDateTime(alert.expires)],
+      ["Issued", formatDateTime(alert.sent)],
+      ["Status", alert.status],
+      ["Response", alert.response],
+      ["States", alert.states.join(", ") || "Multi-area"],
+    ],
+  }, { onClose: clearSelection });
 }
 
 function openStormDetails(storm) {
@@ -911,37 +900,36 @@ function openStormDetails(storm) {
     ? `moving ${compassFromDegrees(storm.movement.directionDeg)} at ${Math.round(storm.movement.speedMph)} mph`
     : "movement data unavailable";
 
-  elements.dialog.className = `alert-dialog alert-card--${classificationToLevel(storm.classificationInfo)}`;
-  elements.dialogEyebrow.textContent = `Official ${storm.authority} advisory`;
-  elements.dialogSeverity.textContent = storm.classificationInfo.category
-    ? `Category ${storm.classificationInfo.category}`
-    : storm.classificationInfo.label;
-  elements.dialogTitle.textContent = storm.name;
-  elements.dialogHeadline.textContent = storm.maxWindMph != null
-    ? `Maximum sustained winds ${storm.maxWindMph} mph (${storm.maxWindKt} kt)`
-    : "Wind data unavailable";
-  elements.dialogAreaHeading.textContent = "Current position & movement";
-  elements.dialogArea.textContent = `${storm.positionLabel || "Position unavailable"} — ${movement}`;
-  elements.dialogDescriptionHeading.textContent = "System summary";
-  elements.dialogDescription.textContent = buildStormSummary(storm);
-  elements.dialogInstructionHeading.textContent = "Coastal watches & warnings";
-  elements.dialogInstruction.textContent = describeWatchWarnings(geometry?.watchWarnings)
-    || "No active coastal watches or warnings from this advisory.";
-  elements.instructionSection.hidden = false;
-  elements.dialogAuthority.textContent = storm.authority;
-  elements.dialogSource.href = storm.links.publicAdvisory || storm.sourceUrl;
-  renderDialogMeta([
-    ["Classification", storm.classificationInfo.displayName],
-    ["Max sustained wind", storm.maxWindMph != null ? `${storm.maxWindMph} mph (${storm.maxWindKt} kt)` : "Unavailable"],
-    ["Pressure", storm.pressureMb != null ? `${storm.pressureMb} mb` : "Unavailable"],
-    ["Movement", movement],
-    ["Latest advisory", storm.advisory?.number ? `#${storm.advisory.number}` : "Unavailable"],
-    ["Advisory issued", storm.advisory?.issuedAtLabel],
-    ["Basin", storm.basin],
-    ["Last updated", formatDateTime(storm.lastUpdate)],
-  ]);
-
-  showDialog();
+  openEventDialog({
+    level: classificationToSeverityTier(storm.classificationInfo),
+    eyebrow: `Official ${storm.authority} advisory`,
+    severityLabel: storm.classificationInfo.category
+      ? `Category ${storm.classificationInfo.category}`
+      : storm.classificationInfo.label,
+    title: storm.name,
+    headline: storm.maxWindMph != null
+      ? `Maximum sustained winds ${storm.maxWindMph} mph (${storm.maxWindKt} kt)`
+      : "Wind data unavailable",
+    areaHeading: "Current position & movement",
+    area: `${storm.positionLabel || "Position unavailable"} — ${movement}`,
+    descriptionHeading: "System summary",
+    description: buildStormSummary(storm),
+    instructionHeading: "Coastal watches & warnings",
+    instruction: describeWatchWarnings(geometry?.watchWarnings)
+      || "No active coastal watches or warnings from this advisory.",
+    authority: storm.authority,
+    sourceUrl: storm.links.publicAdvisory || storm.sourceUrl,
+    fields: [
+      ["Classification", storm.classificationInfo.displayName],
+      ["Max sustained wind", storm.maxWindMph != null ? `${storm.maxWindMph} mph (${storm.maxWindKt} kt)` : "Unavailable"],
+      ["Pressure", storm.pressureMb != null ? `${storm.pressureMb} mb` : "Unavailable"],
+      ["Movement", movement],
+      ["Latest advisory", storm.advisory?.number ? `#${storm.advisory.number}` : "Unavailable"],
+      ["Advisory issued", storm.advisory?.issuedAtLabel],
+      ["Basin", storm.basin],
+      ["Last updated", formatDateTime(storm.lastUpdate)],
+    ],
+  }, { onClose: clearSelection });
 }
 
 function buildStormSummary(storm) {
@@ -966,20 +954,6 @@ function describeWatchWarnings(collection) {
     features.map((feature) => labels[feature.properties?.tcww] || feature.properties?.tcww).filter(Boolean),
   )];
   return unique.join(", ");
-}
-
-function showDialog() {
-  if (elements.dialog.open) elements.dialog.close();
-  elements.dialog.showModal();
-}
-
-function renderDialogMeta(fields) {
-  elements.dialogMeta.replaceChildren();
-  fields.forEach(([label, value]) => {
-    const item = createElement("div");
-    item.append(createElement("span", "", label), createElement("strong", "", value || "Unavailable"));
-    elements.dialogMeta.append(item);
-  });
 }
 
 function clearSelection() {
@@ -1053,46 +1027,4 @@ function hideError() {
   elements.error.hidden = true;
 }
 
-function announce(message) {
-  elements.liveRegion.textContent = "";
-  window.setTimeout(() => {
-    elements.liveRegion.textContent = message;
-  }, 50);
-}
-
-function formatDateTime(date, { compact = false, timeOnly = false } = {}) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "Not specified";
-
-  const options = timeOnly
-    ? { hour: "numeric", minute: "2-digit", second: "2-digit" }
-    : compact
-      ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
-      : { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" };
-  return new Intl.DateTimeFormat("en-US", options).format(date);
-}
-
-function createElement(tagName, className = "", text = "") {
-  const element = document.createElement(tagName);
-  if (className) element.className = className;
-  if (text !== "") element.textContent = text;
-  return element;
-}
-
-function createSvgUse(reference) {
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("aria-hidden", "true");
-  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-  use.setAttribute("href", reference);
-  svg.append(use);
-  return svg;
-}
-
-function capitalize(value) {
-  return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : "";
-}
-
-function pluralize(word, count) {
-  return count === 1 ? word : `${word}s`;
-}
-
-setView(window.location.hash === "#storm-center" ? "storm" : "weather", false);
+setView(viewFromHash(window.location.hash), false);
