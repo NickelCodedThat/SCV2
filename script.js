@@ -1,5 +1,11 @@
+// Local dev (config.js present, served over plain HTTP): call WeatherAPI
+// directly with the key from config.js — unchanged from before.
+// Production (config.js intentionally not deployed, see .gitignore): fall
+// back to the /api/weather serverless proxy, which holds the key server-side
+// via the WEATHERAPI_KEY Vercel environment variable.
 const apiKey = window.STORM_CHASER_CONFIG?.weatherApiKey || "";
-const apiEndpoint = "https://api.weatherapi.com/v1/forecast.json";
+const directEndpoint = "https://api.weatherapi.com/v1/forecast.json";
+const proxyEndpoint = "/api/weather";
 
 const app = document.querySelector(".weather-app");
 const form = document.querySelector("#locationForm");
@@ -76,13 +82,6 @@ retryButton.addEventListener("click", () => {
 });
 
 async function fetchWeatherData(location) {
-  if (!apiKey) {
-    const message = "WeatherAPI is not configured. Copy config.example.js to config.js and add your API key.";
-    showError(message);
-    announce(message);
-    return;
-  }
-
   if (activeRequest) {
     activeRequest.abort();
   }
@@ -92,16 +91,25 @@ async function fetchWeatherData(location) {
   setLoading(true);
   hideError();
 
-  const params = new URLSearchParams({
-    key: apiKey,
-    q: location,
-    days: "3",
-    aqi: "no",
-    alerts: "no",
-  });
+  const params = new URLSearchParams({ q: location, days: "3", aqi: "no", alerts: "no" });
+  let requestUrl;
+  if (apiKey) {
+    params.set("key", apiKey);
+    requestUrl = `${directEndpoint}?${params}`;
+  } else {
+    requestUrl = `${proxyEndpoint}?${params}`;
+  }
 
   try {
-    const response = await fetch(`${apiEndpoint}?${params}`, { signal: controller.signal });
+    const response = await fetch(requestUrl, { signal: controller.signal });
+
+    if (!apiKey && response.status === 404) {
+      // No config.js key and no /api/weather route either — this is a plain
+      // static server (e.g. `python3 -m http.server`) with no serverless
+      // functions available, not a real production failure.
+      throw new Error("WeatherAPI is not configured. Copy config.example.js to config.js and add your API key.");
+    }
+
     const data = await response.json().catch(() => null);
 
     if (!response.ok || !data || data.error) {
