@@ -74,6 +74,10 @@ export async function fetchOpenMeteoWeather(locationQuery, { signal, fetchImpl =
   if (query.length > MAX_LOCATION_LENGTH) throw new Error("The location query is too long.");
 
   const location = await geocodeLocation(query, { signal, fetchImpl });
+  return fetchOpenMeteoWeatherForLocation(location, { signal, fetchImpl });
+}
+
+export async function fetchOpenMeteoWeatherForLocation(location, { signal, fetchImpl = fetch } = {}) {
   const forecast = await fetchForecast(location, { signal, fetchImpl });
   return normalizeOpenMeteoWeather(location, forecast);
 }

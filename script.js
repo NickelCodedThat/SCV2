@@ -1,8 +1,15 @@
-import { fetchOpenMeteoWeather } from "./services/open-meteo-weather.js";
+import {
+  fetchOpenMeteoWeather,
+  fetchOpenMeteoWeatherForLocation,
+} from "./services/open-meteo-weather.js";
+import { fetchLocationSuggestions } from "./services/location-suggestions.js";
+
+const AUTOCOMPLETE_DELAY_MS = 250;
 
 const app = document.querySelector(".weather-app");
 const form = document.querySelector("#locationForm");
 const searchInput = document.querySelector("#locationSearch");
+const suggestions = document.querySelector("#locationSuggestions");
 const errorMessage = document.querySelector("#errorMessage");
 const errorText = document.querySelector("#errorText");
 const retryButton = document.querySelector("#retryButton");
@@ -48,9 +55,20 @@ const output = {
 let currentLocation = "New York";
 let lastSuccessfulLocation = currentLocation;
 let activeRequest;
+let suggestionRequest;
+let suggestionTimer;
+let suggestionSequence = 0;
+let suggestionResults = [];
+let activeSuggestionIndex = -1;
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
+
+  if (activeSuggestionIndex >= 0 && suggestionResults[activeSuggestionIndex]) {
+    selectSuggestion(suggestionResults[activeSuggestionIndex]);
+    return;
+  }
+
   const location = searchInput.value.trim();
 
   if (!location) {
@@ -60,7 +78,54 @@ form.addEventListener("submit", (event) => {
   }
 
   currentLocation = location;
+  closeSuggestions();
   fetchWeatherData(location);
+});
+
+searchInput.addEventListener("input", () => {
+  const query = searchInput.value.trim();
+  window.clearTimeout(suggestionTimer);
+  suggestionRequest?.abort();
+  suggestionRequest = null;
+  suggestionSequence += 1;
+  suggestionResults = [];
+  activeSuggestionIndex = -1;
+  suggestions.hidden = true;
+  suggestions.replaceChildren();
+  searchInput.setAttribute("aria-expanded", "false");
+  searchInput.removeAttribute("aria-activedescendant");
+
+  if (!query) {
+    closeSuggestions();
+    return;
+  }
+
+  const requestSequence = suggestionSequence;
+  suggestionTimer = window.setTimeout(() => {
+    loadSuggestions(query, requestSequence);
+  }, AUTOCOMPLETE_DELAY_MS);
+});
+
+searchInput.addEventListener("keydown", (event) => {
+  if (suggestions.hidden) return;
+
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    moveActiveSuggestion(1);
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    moveActiveSuggestion(-1);
+  } else if (event.key === "Enter" && activeSuggestionIndex >= 0) {
+    event.preventDefault();
+    selectSuggestion(suggestionResults[activeSuggestionIndex]);
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    closeSuggestions();
+  }
+});
+
+document.addEventListener("click", (event) => {
+  if (!form.contains(event.target)) closeSuggestions();
 });
 
 quickLocations.forEach((button) => {
@@ -74,7 +139,7 @@ retryButton.addEventListener("click", () => {
   fetchWeatherData(currentLocation || lastSuccessfulLocation);
 });
 
-async function fetchWeatherData(location) {
+async function fetchWeatherData(location, resolvedLocation = null) {
   if (activeRequest) {
     activeRequest.abort();
   }
@@ -85,7 +150,9 @@ async function fetchWeatherData(location) {
   hideError();
 
   try {
-    const data = await fetchOpenMeteoWeather(location, { signal: controller.signal });
+    const data = resolvedLocation
+      ? await fetchOpenMeteoWeatherForLocation(resolvedLocation, { signal: controller.signal })
+      : await fetchOpenMeteoWeather(location, { signal: controller.signal });
 
     renderWeather(data);
     lastSuccessfulLocation = location;
@@ -106,6 +173,103 @@ async function fetchWeatherData(location) {
       setLoading(false);
     }
   }
+}
+
+async function loadSuggestions(query, requestSequence) {
+  const controller = new AbortController();
+  suggestionRequest = controller;
+
+  try {
+    const results = await fetchLocationSuggestions(query, { signal: controller.signal });
+    if (requestSequence !== suggestionSequence || searchInput.value.trim() !== query) return;
+
+    if (results.length === 0) {
+      renderSuggestionMessage("No matching locations.");
+      return;
+    }
+    renderSuggestions(results);
+  } catch (error) {
+    if (error.name === "AbortError" || requestSequence !== suggestionSequence) return;
+    renderSuggestionMessage("Suggestions unavailable. You can still search normally.");
+  } finally {
+    if (suggestionRequest === controller) suggestionRequest = null;
+  }
+}
+
+function renderSuggestions(results) {
+  suggestionResults = results;
+  activeSuggestionIndex = -1;
+  suggestions.replaceChildren();
+
+  results.forEach((location, index) => {
+    const option = createElement("button", "location-suggestion");
+    option.type = "button";
+    option.id = `location-suggestion-${index}`;
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", "false");
+    option.append(
+      createElement("strong", "", location.name),
+      createElement("span", "", formatLocationSuggestion(location)),
+    );
+    option.addEventListener("click", () => selectSuggestion(location));
+    suggestions.append(option);
+  });
+
+  suggestions.hidden = false;
+  searchInput.setAttribute("aria-expanded", "true");
+  searchInput.removeAttribute("aria-activedescendant");
+}
+
+function renderSuggestionMessage(message) {
+  suggestionResults = [];
+  activeSuggestionIndex = -1;
+  suggestions.replaceChildren(createElement("p", "location-suggestions__message", message));
+  suggestions.hidden = false;
+  searchInput.setAttribute("aria-expanded", "true");
+  searchInput.removeAttribute("aria-activedescendant");
+}
+
+function moveActiveSuggestion(direction) {
+  if (suggestionResults.length === 0) return;
+  activeSuggestionIndex = (activeSuggestionIndex + direction + suggestionResults.length) % suggestionResults.length;
+
+  suggestions.querySelectorAll("[role='option']").forEach((option, index) => {
+    const isActive = index === activeSuggestionIndex;
+    option.classList.toggle("is-active", isActive);
+    option.setAttribute("aria-selected", String(isActive));
+    if (isActive) {
+      searchInput.setAttribute("aria-activedescendant", option.id);
+      option.scrollIntoView({ block: "nearest" });
+    }
+  });
+}
+
+function selectSuggestion(location) {
+  const label = formatLocationSuggestion(location, { includeName: true });
+  currentLocation = label;
+  searchInput.value = label;
+  closeSuggestions();
+  fetchWeatherData(label, location);
+}
+
+function closeSuggestions() {
+  window.clearTimeout(suggestionTimer);
+  suggestionRequest?.abort();
+  suggestionRequest = null;
+  suggestionSequence += 1;
+  suggestionResults = [];
+  activeSuggestionIndex = -1;
+  suggestions.hidden = true;
+  suggestions.replaceChildren();
+  searchInput.setAttribute("aria-expanded", "false");
+  searchInput.removeAttribute("aria-activedescendant");
+}
+
+function formatLocationSuggestion(location, { includeName = false } = {}) {
+  const context = [location.admin1 || location.admin2, location.country]
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index);
+  return [...(includeName ? [location.name] : []), ...context].join(", ");
 }
 
 function renderWeather(data) {

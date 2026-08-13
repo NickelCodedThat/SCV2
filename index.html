@@ -68,12 +68,13 @@
         <form class="search-form" id="locationForm" role="search" novalidate>
           <label class="sr-only" for="locationSearch">Search for a city or location</label>
           <svg class="search-form__icon" aria-hidden="true"><use href="#icon-search"></use></svg>
-          <input id="locationSearch" class="search-form__input" type="search" name="location" placeholder="Search city or location" autocomplete="off" spellcheck="false" enterkeyhint="search">
+          <input id="locationSearch" class="search-form__input" type="search" name="location" placeholder="Search city or location" autocomplete="off" spellcheck="false" enterkeyhint="search" role="combobox" aria-autocomplete="list" aria-controls="locationSuggestions" aria-expanded="false">
           <button class="search-form__submit" type="submit" aria-label="Search for weather">
             <span>Search</span>
             <svg aria-hidden="true"><use href="#icon-search"></use></svg>
             <span class="button-spinner" aria-hidden="true"></span>
           </button>
+          <div class="location-suggestions" id="locationSuggestions" role="listbox" aria-label="Location suggestions" hidden></div>
         </form>
 
         <nav class="app-nav" aria-label="Application views">

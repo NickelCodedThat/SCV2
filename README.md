@@ -93,7 +93,8 @@ accounts and no server-side state.
 
 ## Data sources
 
-- Local weather and geocoding: [Open-Meteo](https://open-meteo.com/)
+- Local weather and submitted-search geocoding: [Open-Meteo](https://open-meteo.com/)
+- Location autocomplete: [Photon](https://photon.komoot.io/) using OpenStreetMap data
 - U.S. alerts: [NOAA/National Weather Service](https://www.weather.gov/documentation/services-web-api)
 - Radar: [NOAA/NWS nowCOAST](https://nowcoast.noaa.gov/) (NEXRAD/MRMS CONUS base reflectivity mosaic)
 - Tropical tracking: [NOAA's tropical summary MapServer](https://mapservices.weather.noaa.gov/tropical/rest/services/tropical/NHC_tropical_weather_summary/MapServer) (National Hurricane Center / Central Pacific Hurricane Center data)
