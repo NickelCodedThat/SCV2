@@ -3,18 +3,46 @@ import {
   fetchOpenMeteoWeatherForLocation,
 } from "./services/open-meteo-weather.js";
 import { fetchLocationSuggestions } from "./services/location-suggestions.js";
+import { getCurrentCoordinates } from "./services/geolocation.js";
+import { reverseGeocodeCoordinates } from "./services/reverse-geocode.js";
+import {
+  getQuickLocations,
+  isSaved as isQuickLocationSaved,
+  saveLocation as saveQuickLocation,
+  removeLocation as removeQuickLocation,
+  buildLocationId,
+  QUICK_LOCATIONS_MAX,
+} from "./services/quick-locations.js";
+import { findNearestTideStation } from "./services/noaa-tide-stations.js";
+import { fetchTidePredictions } from "./services/noaa-tide-predictions.js";
+import { normalizeTidePredictions } from "./utils/tide-normalize.js";
+import { createSvgUse } from "./utils/dom.js";
 
 const AUTOCOMPLETE_DELAY_MS = 250;
+const SVG_NS = "http://www.w3.org/2000/svg";
+const TIDE_CHART_WIDTH = 400;
+const TIDE_CHART_HEIGHT = 160;
+const TIDE_CHART_PADDING = { top: 14, right: 10, bottom: 22, left: 10 };
 
 const app = document.querySelector(".weather-app");
 const form = document.querySelector("#locationForm");
 const searchInput = document.querySelector("#locationSearch");
 const suggestions = document.querySelector("#locationSuggestions");
 const errorMessage = document.querySelector("#errorMessage");
+const errorHeading = document.querySelector("#errorHeading");
 const errorText = document.querySelector("#errorText");
+const DEFAULT_ERROR_HEADING = errorHeading.textContent;
 const retryButton = document.querySelector("#retryButton");
 const liveRegion = document.querySelector("#liveRegion");
-const quickLocations = document.querySelectorAll(".quick-location");
+const currentLocationButton = document.querySelector("#currentLocationButton");
+const saveQuickLocationButton = document.querySelector("#saveQuickLocationButton");
+const quickLocationsList = document.querySelector("#quickLocationsList");
+const tideSection = document.querySelector("#tideSection");
+const tideStationLabel = document.querySelector("#tideStationLabel");
+const tideNextHigh = document.querySelector("#tideNextHigh");
+const tideNextLow = document.querySelector("#tideNextLow");
+const tideChart = document.querySelector("#tideChart");
+const tideCaption = document.querySelector("#tideCaption");
 
 const output = {
   locationName: document.querySelector("#locationName"),
@@ -60,6 +88,9 @@ let suggestionTimer;
 let suggestionSequence = 0;
 let suggestionResults = [];
 let activeSuggestionIndex = -1;
+let currentLocationRecord = null; // full {name, admin1, ..., latitude, longitude, timezone} for whatever's on screen
+let tideRequestController = null;
+let tideRequestSequence = 0;
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -128,15 +159,53 @@ document.addEventListener("click", (event) => {
   if (!form.contains(event.target)) closeSuggestions();
 });
 
-quickLocations.forEach((button) => {
-  button.addEventListener("click", () => {
-    currentLocation = button.dataset.location;
-    fetchWeatherData(currentLocation);
-  });
-});
-
 retryButton.addEventListener("click", () => {
   fetchWeatherData(currentLocation || lastSuccessfulLocation);
+});
+
+currentLocationButton.addEventListener("click", async () => {
+  if (currentLocationButton.disabled) return;
+  currentLocationButton.disabled = true;
+  closeSuggestions();
+  setLoading(true);
+  hideError();
+
+  try {
+    const coordinates = await getCurrentCoordinates();
+    const resolvedLocation = await reverseGeocodeCoordinates(coordinates.latitude, coordinates.longitude);
+    currentLocation = resolvedLocation.name;
+    searchInput.value = "";
+    await fetchWeatherData(currentLocation, resolvedLocation);
+  } catch (error) {
+    setLoading(false);
+    const message = error.message || "We couldn’t use your location right now.";
+    showError(message);
+    announce(message);
+  } finally {
+    currentLocationButton.disabled = false;
+  }
+});
+
+saveQuickLocationButton.addEventListener("click", () => {
+  if (!currentLocationRecord) return;
+
+  const id = buildLocationId(currentLocationRecord.latitude, currentLocationRecord.longitude);
+  if (isQuickLocationSaved(id)) {
+    removeQuickLocation(id);
+  } else {
+    const result = saveQuickLocation(currentLocationRecord);
+    if (!result.ok) {
+      const message = result.reason === "limit"
+        ? `You’ve reached the quick locations limit (${QUICK_LOCATIONS_MAX}). Remove one to add another.`
+        : "This location couldn’t be saved right now.";
+      showError(message, "Quick locations is full.");
+      announce(message);
+      return;
+    }
+  }
+
+  renderQuickLocationsList();
+  updateSaveQuickLocationButton();
 });
 
 async function fetchWeatherData(location, resolvedLocation = null) {
@@ -298,7 +367,20 @@ function renderWeather(data) {
   renderHourlyForecast(forecast.forecastday, current.last_updated_epoch);
   renderAstronomy(today.astro, location.localtime);
   updateAtmosphere(current);
-  updateActiveLocation(location.name);
+
+  currentLocationRecord = {
+    name: location.name,
+    admin1: location.admin1,
+    admin2: location.admin2,
+    country: location.country,
+    country_code: location.country_code,
+    latitude: location.latitude,
+    longitude: location.longitude,
+    timezone: location.timezone,
+  };
+  updateSaveQuickLocationButton();
+  renderQuickLocationsList();
+  loadTides(location.latitude, location.longitude);
 }
 
 function renderMetrics(current, today) {
@@ -415,6 +497,225 @@ function updateAtmosphere(current) {
   app.style.setProperty("--weather-image", `url("./images/${timeOfDay}/${imageType}.jpg")`);
 }
 
+function renderQuickLocationsList() {
+  const locations = getQuickLocations();
+  const activeId = currentLocationRecord
+    ? buildLocationId(currentLocationRecord.latitude, currentLocationRecord.longitude)
+    : "";
+
+  quickLocationsList.replaceChildren();
+
+  if (locations.length === 0) {
+    quickLocationsList.append(
+      createElement("p", "quick-locations__empty", "No saved locations yet. Use the bookmark button above to save the current location."),
+    );
+    return;
+  }
+
+  locations.forEach((location) => {
+    const item = createElement("div", "quick-location");
+    if (location.id === activeId) item.setAttribute("aria-current", "true");
+
+    const selectButton = createElement("button", "quick-location__select");
+    selectButton.type = "button";
+    const textWrap = createElement("span", "", location.name);
+    const regionLine = [location.admin1 || location.admin2, location.country].filter(Boolean).join(", ");
+    textWrap.append(createElement("small", "", regionLine));
+    selectButton.append(createSvgUse("#icon-map-pin"), textWrap);
+    selectButton.addEventListener("click", () => {
+      currentLocation = location.name;
+      closeSuggestions();
+      searchInput.value = "";
+      fetchWeatherData(location.name, location);
+    });
+
+    const removeButton = createElement("button", "quick-location__remove icon-button");
+    removeButton.type = "button";
+    removeButton.setAttribute("aria-label", `Remove ${location.name} from quick locations`);
+    removeButton.append(createSvgUse("#icon-x"));
+    removeButton.addEventListener("click", () => {
+      removeQuickLocation(location.id);
+      renderQuickLocationsList();
+      updateSaveQuickLocationButton();
+    });
+
+    item.append(selectButton, removeButton);
+    quickLocationsList.append(item);
+  });
+}
+
+function updateSaveQuickLocationButton() {
+  if (!currentLocationRecord || !Number.isFinite(currentLocationRecord.latitude) || !Number.isFinite(currentLocationRecord.longitude)) {
+    saveQuickLocationButton.hidden = true;
+    return;
+  }
+
+  saveQuickLocationButton.hidden = false;
+  const id = buildLocationId(currentLocationRecord.latitude, currentLocationRecord.longitude);
+  const saved = isQuickLocationSaved(id);
+  saveQuickLocationButton.setAttribute("aria-pressed", String(saved));
+  saveQuickLocationButton.setAttribute(
+    "aria-label",
+    saved ? `Remove ${currentLocationRecord.name} from quick locations` : `Save ${currentLocationRecord.name} to quick locations`,
+  );
+}
+
+/**
+ * Tide lookup runs after Weather has already rendered and never blocks or
+ * fails it — a missing station, a NOAA outage, or malformed data all just
+ * mean the Tide section stays hidden. Sequenced with a request counter (the
+ * same pattern as the autocomplete requests above) so a slow lookup for a
+ * previous location can never clobber a faster one for the current location.
+ */
+async function loadTides(latitude, longitude) {
+  tideRequestController?.abort();
+  const controller = new AbortController();
+  tideRequestController = controller;
+  const requestSequence = ++tideRequestSequence;
+
+  hideTideSection();
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
+  try {
+    const station = await findNearestTideStation(latitude, longitude, { signal: controller.signal });
+    if (requestSequence !== tideRequestSequence) return;
+    if (!station) return; // not a coastal location — no error, just no section
+
+    const predictions = await fetchTidePredictions(station.id, { signal: controller.signal });
+    if (requestSequence !== tideRequestSequence) return;
+
+    const tide = normalizeTidePredictions(predictions, { stationName: station.name });
+    renderTides(tide);
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    hideTideSection();
+  }
+}
+
+function hideTideSection() {
+  tideSection.hidden = true;
+  tideChart.replaceChildren();
+}
+
+function renderTides(tide) {
+  tideSection.hidden = false;
+  tideStationLabel.textContent = tide.stationName;
+  tideNextHigh.textContent = tide.nextHigh
+    ? `${formatDecimal(tide.nextHigh.height)} ${tide.unit} at ${formatClockTime(tide.nextHigh.time)}`
+    : "Unavailable";
+  tideNextLow.textContent = tide.nextLow
+    ? `${formatDecimal(tide.nextLow.height)} ${tide.unit} at ${formatClockTime(tide.nextLow.time)}`
+    : "Unavailable";
+  tideCaption.textContent =
+    `Predictions for ${formatClockDate(tide.generatedAt)} · NOAA Tides & Currents · ${tide.datum} datum, ${tide.unit}.`;
+
+  renderTideChart(tide);
+}
+
+function renderTideChart(tide) {
+  tideChart.replaceChildren();
+  tideChart.setAttribute("aria-label", buildTideChartAriaLabel(tide));
+
+  const points = tide.curve;
+  if (points.length < 2) return;
+
+  const allHeights = points.map((point) => point.height).concat(tide.extremes.map((extreme) => extreme.height));
+  const minTime = points[0].time.getTime();
+  const maxTime = points[points.length - 1].time.getTime();
+  const minHeight = Math.min(...allHeights);
+  const maxHeight = Math.max(...allHeights);
+  const heightPad = Math.max((maxHeight - minHeight) * 0.15, 0.2);
+  const paddedMin = minHeight - heightPad;
+  const paddedMax = maxHeight + heightPad;
+
+  const chartLeft = TIDE_CHART_PADDING.left;
+  const chartRight = TIDE_CHART_WIDTH - TIDE_CHART_PADDING.right;
+  const chartTop = TIDE_CHART_PADDING.top;
+  const chartBottom = TIDE_CHART_HEIGHT - TIDE_CHART_PADDING.bottom;
+
+  const xFor = (time) => chartLeft + ((time - minTime) / (maxTime - minTime || 1)) * (chartRight - chartLeft);
+  const yFor = (height) => chartBottom - ((height - paddedMin) / (paddedMax - paddedMin || 1)) * (chartBottom - chartTop);
+
+  const linePoints = points.map((point) => `${xFor(point.time.getTime())},${yFor(point.height)}`).join(" ");
+  const fillPoints = `${xFor(minTime)},${chartBottom} ${linePoints} ${xFor(maxTime)},${chartBottom}`;
+
+  const fill = document.createElementNS(SVG_NS, "polygon");
+  fill.setAttribute("class", "tide-chart__fill");
+  fill.setAttribute("points", fillPoints);
+  tideChart.append(fill);
+
+  const line = document.createElementNS(SVG_NS, "polyline");
+  line.setAttribute("class", "tide-chart__line");
+  line.setAttribute("points", linePoints);
+  tideChart.append(line);
+
+  tide.extremes.forEach((extreme) => {
+    const cx = xFor(extreme.time.getTime());
+    const cy = yFor(extreme.height);
+
+    const point = document.createElementNS(SVG_NS, "circle");
+    point.setAttribute("class", "tide-chart__point");
+    point.setAttribute("cx", cx);
+    point.setAttribute("cy", cy);
+    point.setAttribute("r", 3.5);
+    tideChart.append(point);
+
+    const label = document.createElementNS(SVG_NS, "text");
+    label.setAttribute("x", cx);
+    label.setAttribute("y", extreme.type === "high" ? Math.max(cy - 8, 10) : Math.min(cy + 16, TIDE_CHART_HEIGHT - TIDE_CHART_PADDING.bottom + 14));
+    label.setAttribute("text-anchor", cx < 30 ? "start" : cx > chartRight - 30 ? "end" : "middle");
+    label.textContent = `${extreme.type === "high" ? "H" : "L"} ${formatDecimal(extreme.height)}`;
+    tideChart.append(label);
+  });
+
+  pickAxisTimeLabels(points).forEach(({ time, label: labelText }) => {
+    const x = xFor(time.getTime());
+    const label = document.createElementNS(SVG_NS, "text");
+    label.setAttribute("x", x);
+    label.setAttribute("y", TIDE_CHART_HEIGHT - 6);
+    label.setAttribute("text-anchor", x < chartLeft + 20 ? "start" : x > chartRight - 20 ? "end" : "middle");
+    label.textContent = labelText;
+    tideChart.append(label);
+  });
+}
+
+function pickAxisTimeLabels(points) {
+  const labelCount = Math.min(5, points.length);
+  if (labelCount < 2) return [];
+
+  const step = (points.length - 1) / (labelCount - 1);
+  const picked = [];
+  for (let i = 0; i < labelCount; i += 1) {
+    const point = points[Math.round(i * step)];
+    picked.push({ time: point.time, label: formatClockTime(point.time) });
+  }
+  return picked;
+}
+
+function buildTideChartAriaLabel(tide) {
+  if (tide.curve.length < 2) return "Tide chart unavailable.";
+
+  const heights = tide.curve.map((point) => point.height);
+  const min = formatDecimal(Math.min(...heights));
+  const max = formatDecimal(Math.max(...heights));
+  const highText = tide.nextHigh
+    ? `high tide ${formatDecimal(tide.nextHigh.height)} ${tide.unit} at ${formatClockTime(tide.nextHigh.time)}`
+    : "no upcoming high tide in this window";
+  const lowText = tide.nextLow
+    ? `low tide ${formatDecimal(tide.nextLow.height)} ${tide.unit} at ${formatClockTime(tide.nextLow.time)}`
+    : "no upcoming low tide in this window";
+
+  return `Tide chart for the next 24 hours at ${tide.stationName}, ranging from ${min} to ${max} ${tide.unit}, with ${highText} and ${lowText}.`;
+}
+
+function formatClockTime(date) {
+  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(date);
+}
+
+function formatClockDate(date) {
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date);
+}
+
 function classifyWeather(conditionText, conditionCode) {
   const text = conditionText.toLowerCase();
 
@@ -425,26 +726,19 @@ function classifyWeather(conditionText, conditionCode) {
   return "clear";
 }
 
-function updateActiveLocation(locationName) {
-  const normalizedName = normalizeLocationName(locationName);
-
-  quickLocations.forEach((button) => {
-    const buttonName = normalizeLocationName(button.dataset.location);
-    const isCurrent = buttonName.startsWith(normalizedName) || normalizedName.startsWith(buttonName);
-    if (isCurrent) button.setAttribute("aria-current", "true");
-    else button.removeAttribute("aria-current");
-  });
-}
-
 function setLoading(isLoading) {
   form.classList.toggle("is-loading", isLoading);
   form.setAttribute("aria-busy", String(isLoading));
   searchInput.toggleAttribute("disabled", isLoading);
   form.querySelector("button").toggleAttribute("disabled", isLoading);
-  quickLocations.forEach((button) => button.toggleAttribute("disabled", isLoading));
+  currentLocationButton.toggleAttribute("disabled", isLoading);
+  quickLocationsList
+    .querySelectorAll(".quick-location__select, .quick-location__remove")
+    .forEach((button) => button.toggleAttribute("disabled", isLoading));
 }
 
-function showError(message) {
+function showError(message, heading = DEFAULT_ERROR_HEADING) {
+  errorHeading.textContent = heading;
   errorText.textContent = message;
   errorMessage.hidden = false;
 }
@@ -469,10 +763,6 @@ function createElement(tagName, className = "", text = "") {
 
 function normalizeIconUrl(url) {
   return url.startsWith("//") ? `https:${url}` : url;
-}
-
-function normalizeLocationName(name) {
-  return name.toLowerCase().replace(/\bcity\b/g, "").replace(/[^a-z0-9]/g, "");
 }
 
 function formatDate(dateString, options) {
@@ -533,4 +823,5 @@ function describeCloudCover(value) {
   return "Overcast skies";
 }
 
+renderQuickLocationsList();
 fetchWeatherData(currentLocation);

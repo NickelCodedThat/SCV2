@@ -89,6 +89,16 @@ test("normalizeOpenMeteoWeather preserves the Weather renderer contract", () => 
   assert.ok(Number.isFinite(data.current.last_updated_epoch));
 });
 
+test("normalizeOpenMeteoWeather carries the raw structured location fields through", () => {
+  const data = normalizeOpenMeteoWeather(location, forecast);
+  assert.equal(data.location.admin1, "New York");
+  assert.equal(data.location.admin2, "");
+  assert.equal(data.location.country_code, "");
+  assert.equal(data.location.latitude, 40.71427);
+  assert.equal(data.location.longitude, -74.00597);
+  assert.equal(data.location.timezone, "America/New_York");
+});
+
 test("normalizeOpenMeteoWeather rejects malformed provider responses", () => {
   assert.throws(() => normalizeOpenMeteoWeather(location, {}), /unavailable/i);
   assert.throws(

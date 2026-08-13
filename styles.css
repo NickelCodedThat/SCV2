@@ -1018,8 +1018,13 @@ a {
 }
 
 .sun-panel,
-.quick-locations {
+.quick-locations,
+.tide-panel {
   padding: 1.5rem;
+}
+
+.tide-panel {
+  grid-column: 1 / -1;
 }
 
 .sun-track {
@@ -1145,8 +1150,6 @@ a {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 0.95rem;
   background: rgba(255, 255, 255, 0.035);
-  text-align: left;
-  cursor: pointer;
   transition: border-color 180ms ease, background-color 180ms ease;
 }
 
@@ -1160,7 +1163,31 @@ a {
   background: rgba(var(--accent-rgb), 0.11);
 }
 
-.quick-location > svg {
+/* A saved location's card is a container with two controls — the name/
+   region itself is the primary "load this weather" button, and a small
+   trailing icon-button removes it. Split like this (rather than nesting a
+   remove button inside the card's own <button>) because <button> can't
+   contain another <button>. */
+.quick-location__select {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 0.7rem;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quick-location__remove {
+  flex: 0 0 auto;
+}
+
+.quick-location__select > svg {
   width: 1.05rem;
   height: 1.05rem;
   flex: 0 0 auto;
@@ -1189,6 +1216,110 @@ a {
   color: var(--text-muted);
   font-size: 0.6rem;
   font-weight: 400;
+}
+
+.quick-locations__empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+#tideStationLabel {
+  color: var(--text-muted);
+  font-size: 0.73rem;
+}
+
+.tide-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.7rem;
+  margin-top: 1.25rem;
+}
+
+.tide-summary__item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+  padding: 0.8rem;
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.tide-summary__item svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: 0 0 auto;
+  color: var(--accent);
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}
+
+.tide-summary__item span {
+  display: block;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 0.61rem;
+}
+
+.tide-summary__item strong {
+  display: block;
+  margin-top: 0.25rem;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tide-chart-wrap {
+  width: 100%;
+  max-width: 640px;
+  margin-top: 1.25rem;
+  overflow: hidden;
+}
+
+.tide-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+}
+
+.tide-chart text {
+  fill: var(--text-muted);
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.tide-chart .tide-chart__line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.tide-chart .tide-chart__fill {
+  fill: rgba(var(--accent-rgb), 0.14);
+  stroke: none;
+}
+
+.tide-chart .tide-chart__point {
+  fill: var(--card-bg-strong);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.tide-caption {
+  margin: 0.9rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.64rem;
 }
 
 .footer {
@@ -1437,7 +1568,8 @@ input:focus-visible {
   .forecast-panel,
   .hourly-panel,
   .sun-panel,
-  .quick-locations {
+  .quick-locations,
+  .tide-panel {
     padding: 1.2rem;
   }
 

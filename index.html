@@ -47,6 +47,8 @@
       <symbol id="icon-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3a13.5 13.5 0 0 1 3.5 9 13.5 13.5 0 0 1-3.5 9 13.5 13.5 0 0 1-3.5-9A13.5 13.5 0 0 1 12 3Z"></path></symbol>
       <symbol id="icon-bookmark" viewBox="0 0 24 24"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"></path></symbol>
       <symbol id="icon-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 10.5 6.8-3.9M8.6 13.5l6.8 3.9"></path></symbol>
+      <symbol id="icon-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path></symbol>
+      <symbol id="icon-waves" viewBox="0 0 24 24"><path d="M2 16c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0 3-1.5 4.5 0 3 1.5 4.5 0"></path><path d="M2 11c1.5-1.5 3-1.5 4.5 0s3 1.5 4.5 0 3-1.5 4.5 0 3 1.5 4.5 0"></path></symbol>
     </svg>
 
     <div class="weather-app" data-weather="cloudy" data-time="day" data-view="weather">
@@ -95,7 +97,7 @@
 
       <div class="app-status" id="errorMessage" role="alert" hidden>
         <svg aria-hidden="true"><use href="#icon-alert"></use></svg>
-        <p><strong>We couldn’t find that weather.</strong><span id="errorText">Check the location and try again.</span></p>
+        <p><strong id="errorHeading">We couldn’t find that weather.</strong><span id="errorText">Check the location and try again.</span></p>
         <button id="retryButton" type="button">
           <svg aria-hidden="true"><use href="#icon-refresh"></use></svg>
           Try again
@@ -115,6 +117,9 @@
               <h1 id="currentWeatherHeading"><span id="locationName">Loading weather</span></h1>
               <p id="locationRegion">Please wait a moment</p>
             </div>
+            <button class="icon-button" id="currentLocationButton" type="button" aria-label="Use current location">
+              <svg aria-hidden="true"><use href="#icon-locate"></use></svg>
+            </button>
           </div>
 
           <div class="hero-panel__weather">
@@ -250,13 +255,37 @@
               <p class="eyebrow">Explore</p>
               <h2 id="quickLocationsHeading">Quick locations</h2>
             </div>
+            <button class="icon-button" id="saveQuickLocationButton" type="button" aria-pressed="false" aria-label="Save current location to quick locations" hidden>
+              <svg aria-hidden="true"><use href="#icon-bookmark"></use></svg>
+            </button>
           </div>
-          <div class="quick-locations__list">
-            <button class="quick-location" type="button" data-location="New York City"><svg aria-hidden="true"><use href="#icon-map-pin"></use></svg><span>New York City<small>New York</small></span></button>
-            <button class="quick-location" type="button" data-location="Memphis"><svg aria-hidden="true"><use href="#icon-map-pin"></use></svg><span>Memphis<small>Tennessee</small></span></button>
-            <button class="quick-location" type="button" data-location="Myrtle Beach"><svg aria-hidden="true"><use href="#icon-map-pin"></use></svg><span>Myrtle Beach<small>South Carolina</small></span></button>
-            <button class="quick-location" type="button" data-location="Jacksonville"><svg aria-hidden="true"><use href="#icon-map-pin"></use></svg><span>Jacksonville<small>Florida</small></span></button>
+          <div class="quick-locations__list" id="quickLocationsList" aria-live="polite"></div>
+        </section>
+
+        <section class="tide-panel glass-card" id="tideSection" aria-labelledby="tideHeading" hidden>
+          <div class="section-heading section-heading--inline">
+            <div>
+              <p class="eyebrow">Coastal conditions</p>
+              <h2 id="tideHeading">Tides</h2>
+            </div>
+            <span id="tideStationLabel">—</span>
           </div>
+
+          <div class="tide-summary" id="tideSummary">
+            <div class="tide-summary__item">
+              <svg aria-hidden="true"><use href="#icon-waves"></use></svg>
+              <span>Next high tide<strong id="tideNextHigh">—</strong></span>
+            </div>
+            <div class="tide-summary__item">
+              <svg aria-hidden="true"><use href="#icon-waves"></use></svg>
+              <span>Next low tide<strong id="tideNextLow">—</strong></span>
+            </div>
+          </div>
+
+          <div class="tide-chart-wrap">
+            <svg class="tide-chart" id="tideChart" viewBox="0 0 400 160" role="img" aria-label="Tide chart"></svg>
+          </div>
+          <p class="tide-caption" id="tideCaption">Predictions from NOAA Tides & Currents.</p>
         </section>
       </main>
 

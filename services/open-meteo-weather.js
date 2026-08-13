@@ -153,6 +153,15 @@ export function normalizeOpenMeteoWeather(location, data) {
       region: String(location.admin1 || location.admin2 || ""),
       country: String(location.country || location.country_code || ""),
       localtime: currentLocalTime,
+      // Raw structured fields (as opposed to the display-combined `region`
+      // above) — needed by Quick Locations and coastal-tide lookups, which
+      // both require real coordinates rather than a display string.
+      admin1: String(location.admin1 || ""),
+      admin2: String(location.admin2 || ""),
+      country_code: String(location.country_code || ""),
+      latitude: location.latitude,
+      longitude: location.longitude,
+      timezone: location.timezone,
     },
     current: {
       temp_f: finiteNumber(current.temperature_2m),
