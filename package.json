@@ -1,0 +1,8 @@
+{
+  "name": "storm-chaser",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}
