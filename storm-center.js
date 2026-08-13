@@ -224,7 +224,7 @@ const VIEW_HASHES = Object.freeze({ storm: "#storm-center", "live-earth": "#live
 const VIEW_META = Object.freeze({
   weather: {
     title: "Storm Chaser — Weather Dashboard",
-    description: "Real-time local weather, hourly and 3-day forecasts, sunrise/sunset, and moon phase from WeatherAPI.",
+    description: "Real-time local weather, hourly and 3-day forecasts, sunrise/sunset, and moon phase from Open-Meteo.",
   },
   storm: {
     title: "Storm Center — Storm Chaser",

@@ -1,11 +1,4 @@
-// Local dev (config.js present, served over plain HTTP): call WeatherAPI
-// directly with the key from config.js — unchanged from before.
-// Production (config.js intentionally not deployed, see .gitignore): fall
-// back to the /api/weather serverless proxy, which holds the key server-side
-// via the WEATHER_API_KEY Vercel environment variable.
-const apiKey = window.STORM_CHASER_CONFIG?.weatherApiKey || "";
-const directEndpoint = "https://api.weatherapi.com/v1/forecast.json";
-const proxyEndpoint = "/api/weather";
+import { fetchOpenMeteoWeather } from "./services/open-meteo-weather.js";
 
 const app = document.querySelector(".weather-app");
 const form = document.querySelector("#locationForm");
@@ -91,31 +84,8 @@ async function fetchWeatherData(location) {
   setLoading(true);
   hideError();
 
-  const params = new URLSearchParams({ q: location, days: "3", aqi: "no", alerts: "no" });
-  let requestUrl;
-  if (apiKey) {
-    params.set("key", apiKey);
-    requestUrl = `${directEndpoint}?${params}`;
-  } else {
-    requestUrl = `${proxyEndpoint}?${params}`;
-  }
-
   try {
-    const response = await fetch(requestUrl, { signal: controller.signal });
-
-    if (!apiKey && response.status === 404) {
-      // No config.js key and no /api/weather route either — this is a plain
-      // static server (e.g. `python3 -m http.server`) with no serverless
-      // functions available, not a real production failure.
-      throw new Error("WeatherAPI is not configured. Copy config.example.js to config.js and add your API key.");
-    }
-
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok || !data || data.error) {
-      const message = data?.error?.message || "Weather information is unavailable right now.";
-      throw new Error(message);
-    }
+    const data = await fetchOpenMeteoWeather(location, { signal: controller.signal });
 
     renderWeather(data);
     lastSuccessfulLocation = location;
