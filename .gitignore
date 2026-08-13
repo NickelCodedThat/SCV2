@@ -1,0 +1,25 @@
+# Local API configuration and environment files
+config.js
+.env
+.env.*
+!.env.example
+
+# Dependencies and generated output
+node_modules/
+dist/
+build/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor, agent, and operating-system files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.codex/
+.agents/

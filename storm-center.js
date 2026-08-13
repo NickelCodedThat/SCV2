@@ -1,0 +1,525 @@
+import { fetchActiveAlerts, STATE_NAMES } from "./services/nws-alerts.js";
+import { createStormMap } from "./map/storm-map.js";
+
+const REFRESH_INTERVAL = 5 * 60 * 1000;
+const PAGE_SIZE = 30;
+const CATEGORY_LABELS = Object.freeze({
+  all: "weather",
+  tornado: "tornado",
+  "severe-storm": "severe storm",
+  flood: "flood",
+  tropical: "tropical",
+  winter: "winter",
+  fire: "fire weather",
+  heat: "heat",
+  other: "other",
+});
+
+const elements = {
+  app: document.querySelector(".weather-app"),
+  brand: document.querySelector(".brand"),
+  weatherButton: document.querySelector("#weatherViewButton"),
+  stormButton: document.querySelector("#stormViewButton"),
+  weatherDashboard: document.querySelector("#main-content"),
+  stormCenter: document.querySelector("#storm-center"),
+  weatherAttribution: document.querySelector("#weatherAttribution"),
+  stormAttribution: document.querySelector("#stormAttribution"),
+  activeCount: document.querySelector("#activeAlertCount"),
+  lastUpdated: document.querySelector("#stormLastUpdated"),
+  refreshButton: document.querySelector("#refreshStormCenter"),
+  retryButton: document.querySelector("#retryStormCenter"),
+  error: document.querySelector("#stormError"),
+  errorText: document.querySelector("#stormErrorText"),
+  categoryFilters: document.querySelector("#categoryFilters"),
+  categoryButtons: document.querySelectorAll(".filter-chip"),
+  severityFilter: document.querySelector("#severityFilter"),
+  stateFilter: document.querySelector("#stateFilter"),
+  alertFeed: document.querySelector("#alertFeed"),
+  resultCount: document.querySelector("#alertResultCount"),
+  emptyState: document.querySelector("#stormEmptyState"),
+  emptyHeading: document.querySelector("#stormEmptyHeading"),
+  emptyText: document.querySelector("#stormEmptyText"),
+  clearFilters: document.querySelector("#clearStormFilters"),
+  loadMore: document.querySelector("#loadMoreAlerts"),
+  mapContainer: document.querySelector("#stormMap"),
+  mapState: document.querySelector("#stormMapState"),
+  mappedCount: document.querySelector("#mappedAlertCount"),
+  dialog: document.querySelector("#alertDialog"),
+  dialogClose: document.querySelector("#closeAlertDialog"),
+  dialogSeverity: document.querySelector("#alertDialogSeverity"),
+  dialogTitle: document.querySelector("#alertDialogTitle"),
+  dialogHeadline: document.querySelector("#alertDialogHeadline"),
+  dialogMeta: document.querySelector("#alertDialogMeta"),
+  dialogArea: document.querySelector("#alertDialogArea"),
+  dialogDescription: document.querySelector("#alertDialogDescription"),
+  dialogInstruction: document.querySelector("#alertDialogInstruction"),
+  instructionSection: document.querySelector("#alertInstructionSection"),
+  dialogAuthority: document.querySelector("#alertDialogAuthority"),
+  dialogSource: document.querySelector("#alertDialogSource"),
+  liveRegion: document.querySelector("#liveRegion"),
+};
+
+const state = {
+  view: "weather",
+  initialized: false,
+  loading: false,
+  alerts: [],
+  filteredAlerts: [],
+  category: "all",
+  severity: "all",
+  stateCode: "all",
+  visibleCount: PAGE_SIZE,
+  request: null,
+  map: null,
+  mapFailed: false,
+  refreshTimer: null,
+  lastUpdated: null,
+  selectedAlertId: "",
+};
+
+elements.weatherButton.addEventListener("click", () => setView("weather", true));
+elements.stormButton.addEventListener("click", () => setView("storm", true));
+elements.brand.addEventListener("click", (event) => {
+  if (state.view === "storm") {
+    event.preventDefault();
+    setView("weather", true);
+  }
+});
+
+elements.categoryFilters.addEventListener("click", (event) => {
+  const button = event.target.closest(".filter-chip");
+  if (!button) return;
+
+  state.category = button.dataset.category;
+  elements.categoryButtons.forEach((candidate) => {
+    const active = candidate === button;
+    candidate.classList.toggle("is-active", active);
+    candidate.setAttribute("aria-pressed", String(active));
+  });
+  applyFilters();
+});
+
+elements.severityFilter.addEventListener("change", () => {
+  state.severity = elements.severityFilter.value;
+  applyFilters();
+});
+
+elements.stateFilter.addEventListener("change", () => {
+  state.stateCode = elements.stateFilter.value;
+  applyFilters();
+});
+
+elements.refreshButton.addEventListener("click", () => refreshAlerts());
+elements.retryButton.addEventListener("click", () => refreshAlerts());
+elements.clearFilters.addEventListener("click", clearFilters);
+elements.loadMore.addEventListener("click", () => {
+  state.visibleCount += PAGE_SIZE;
+  renderAlertFeed();
+});
+
+elements.dialogClose.addEventListener("click", () => elements.dialog.close());
+elements.dialog.addEventListener("click", (event) => {
+  if (event.target === elements.dialog) elements.dialog.close();
+});
+elements.dialog.addEventListener("close", clearSelection);
+
+window.addEventListener("popstate", () => {
+  setView(window.location.hash === "#storm-center" ? "storm" : "weather", false);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (
+    document.visibilityState === "visible" &&
+    state.view === "storm" &&
+    state.lastUpdated &&
+    Date.now() - state.lastUpdated.getTime() >= REFRESH_INTERVAL
+  ) {
+    refreshAlerts({ silent: true });
+  }
+});
+
+window.addEventListener("beforeunload", () => {
+  state.request?.abort();
+  if (state.refreshTimer) window.clearInterval(state.refreshTimer);
+  state.map?.destroy();
+});
+
+function setView(view, updateHistory) {
+  if (!["weather", "storm"].includes(view)) return;
+
+  state.view = view;
+  const stormIsActive = view === "storm";
+  elements.app.dataset.view = view;
+  elements.weatherDashboard.hidden = stormIsActive;
+  elements.stormCenter.hidden = !stormIsActive;
+  elements.weatherAttribution.hidden = stormIsActive;
+  elements.stormAttribution.hidden = !stormIsActive;
+  elements.weatherButton.classList.toggle("is-active", !stormIsActive);
+  elements.stormButton.classList.toggle("is-active", stormIsActive);
+  elements.weatherButton.setAttribute("aria-pressed", String(!stormIsActive));
+  elements.stormButton.setAttribute("aria-pressed", String(stormIsActive));
+  document.title = stormIsActive
+    ? "Storm Center — Storm Chaser"
+    : "Storm Chaser — Weather Dashboard";
+
+  if (updateHistory) {
+    const url = stormIsActive
+      ? `${window.location.pathname}${window.location.search}#storm-center`
+      : `${window.location.pathname}${window.location.search}`;
+    window.history.pushState({ view }, "", url);
+  }
+
+  if (stormIsActive) {
+    initializeStormCenter();
+    window.setTimeout(() => state.map?.resize(), 0);
+  }
+}
+
+function initializeStormCenter() {
+  if (state.initialized) return;
+  state.initialized = true;
+  startMap();
+  refreshAlerts();
+  state.refreshTimer = window.setInterval(() => {
+    if (state.view === "storm" && document.visibilityState === "visible") {
+      refreshAlerts({ silent: true });
+    }
+  }, REFRESH_INTERVAL);
+}
+
+async function startMap() {
+  setMapState("loading", "Preparing the storm map", "Loading official alert geometry.");
+
+  try {
+    state.map = await createStormMap(elements.mapContainer, {
+      onAlertSelect: (alertId) => {
+        const alert = state.filteredAlerts.find((candidate) => candidate.id === alertId);
+        if (alert) openAlertDetails(alert);
+      },
+    });
+    state.mapFailed = false;
+    updateMap();
+  } catch (error) {
+    state.mapFailed = true;
+    setMapState(
+      "error",
+      "The interactive map is unavailable",
+      "The official alert feed is still available alongside the map.",
+    );
+  }
+}
+
+async function refreshAlerts({ silent = false } = {}) {
+  if (state.loading) return;
+  state.request?.abort();
+
+  const controller = new AbortController();
+  state.request = controller;
+  state.loading = true;
+  hideError();
+  setRefreshState(true);
+  if (!silent && state.alerts.length === 0) setFeedLoading(true);
+
+  try {
+    const result = await fetchActiveAlerts({ signal: controller.signal });
+    state.alerts = result.alerts;
+    state.lastUpdated = result.updatedAt;
+    state.visibleCount = PAGE_SIZE;
+    populateStateFilter();
+    updateLiveStatus();
+    applyFilters();
+    announce(`Storm Center updated with ${state.alerts.length} active alerts.`);
+  } catch (error) {
+    if (error.name === "AbortError") return;
+
+    const message = navigator.onLine
+      ? error.message || "The National Weather Service is temporarily unavailable."
+      : "You appear to be offline. Reconnect and try again.";
+    showError(message);
+
+    if (state.alerts.length === 0) {
+      state.filteredAlerts = [];
+      renderAlertFeed();
+      updateMap();
+    }
+  } finally {
+    if (state.request === controller) {
+      state.request = null;
+      state.loading = false;
+      setRefreshState(false);
+      setFeedLoading(false);
+    }
+  }
+}
+
+function applyFilters() {
+  state.visibleCount = PAGE_SIZE;
+  state.filteredAlerts = state.alerts.filter((alert) => {
+    const matchesCategory = state.category === "all" || alert.category === state.category;
+    const matchesSeverity = state.severity === "all" || alert.level === state.severity;
+    const matchesState = state.stateCode === "all" || alert.states.includes(state.stateCode);
+    return matchesCategory && matchesSeverity && matchesState;
+  });
+
+  renderAlertFeed();
+  updateMap();
+}
+
+function renderAlertFeed() {
+  elements.alertFeed.replaceChildren();
+  elements.alertFeed.setAttribute("aria-busy", "false");
+  elements.resultCount.textContent = `${state.filteredAlerts.length} ${pluralize("result", state.filteredAlerts.length)}`;
+
+  if (state.filteredAlerts.length === 0) {
+    elements.alertFeed.hidden = true;
+    elements.loadMore.hidden = true;
+    renderEmptyState();
+    return;
+  }
+
+  elements.alertFeed.hidden = false;
+  elements.emptyState.hidden = true;
+
+  const fragment = document.createDocumentFragment();
+  state.filteredAlerts.slice(0, state.visibleCount).forEach((alert) => {
+    fragment.append(createAlertCard(alert));
+  });
+  elements.alertFeed.append(fragment);
+
+  const remaining = state.filteredAlerts.length - state.visibleCount;
+  elements.loadMore.hidden = remaining <= 0;
+  if (remaining > 0) {
+    elements.loadMore.textContent = `Load more alerts (${remaining} remaining)`;
+  }
+}
+
+function createAlertCard(alert) {
+  const article = createElement("article", `alert-card alert-card--${alert.level}`);
+  article.dataset.alertId = alert.id;
+  if (alert.id === state.selectedAlertId) article.classList.add("is-selected");
+
+  const button = createElement("button", "alert-card__button");
+  button.type = "button";
+  button.setAttribute("aria-label", `View ${alert.event} details for ${alert.area}`);
+  button.addEventListener("click", () => openAlertDetails(alert));
+
+  const topLine = createElement("div", "alert-card__topline");
+  const badge = createElement("span", "severity-badge", capitalize(alert.level));
+  const time = createElement("span", "alert-card__time", `Expires ${formatDateTime(alert.expires, { compact: true })}`);
+  topLine.append(badge, time);
+
+  const title = createElement("h3", "", alert.event);
+  const headline = createElement("p", "alert-card__headline", alert.headline);
+  const area = createElement("p", "alert-card__area", alert.area);
+
+  const footer = createElement("div", "alert-card__footer");
+  const authority = createElement("span", "", alert.authority);
+  const geometry = createElement("span", "", alert.hasGeometry ? "Mapped area" : "Text area only");
+  geometry.prepend(createSvgUse(alert.hasGeometry ? "#icon-map" : "#icon-list"));
+  footer.append(authority, geometry);
+
+  button.append(topLine, title, headline, area, footer);
+  article.append(button);
+  return article;
+}
+
+function renderEmptyState() {
+  const filtered = state.category !== "all" || state.severity !== "all" || state.stateCode !== "all";
+  const category = CATEGORY_LABELS[state.category] || "weather";
+
+  if (state.alerts.length === 0 && !state.loading) {
+    elements.emptyHeading.textContent = "No active NWS alerts reported";
+    elements.emptyText.textContent = "There are currently no active events in the official national feed.";
+    elements.clearFilters.hidden = true;
+  } else {
+    elements.emptyHeading.textContent = `No active ${category} alerts`;
+    elements.emptyText.textContent = "Try changing a filter to view other National Weather Service events.";
+    elements.clearFilters.hidden = !filtered;
+  }
+
+  elements.emptyState.hidden = false;
+}
+
+function updateLiveStatus() {
+  elements.activeCount.textContent = `${state.alerts.length} Active ${pluralize("Alert", state.alerts.length)}`;
+  elements.lastUpdated.textContent = formatDateTime(state.lastUpdated, { timeOnly: true });
+  elements.lastUpdated.dateTime = state.lastUpdated?.toISOString() || "";
+}
+
+function updateMap() {
+  const mappedAlerts = state.filteredAlerts.filter((alert) => alert.hasGeometry);
+  elements.mappedCount.textContent = `${mappedAlerts.length} of ${state.filteredAlerts.length} mapped`;
+
+  if (state.map) {
+    state.map.setAlerts(mappedAlerts);
+    if (mappedAlerts.length > 0) {
+      elements.mapState.hidden = true;
+    } else {
+      setMapState(
+        "empty",
+        "No mapped areas for this filter",
+        "Some NWS alerts are issued for text-based forecast zones without polygon geometry.",
+      );
+    }
+  } else if (!state.mapFailed) {
+    setMapState("loading", "Preparing the storm map", "Loading official alert geometry.");
+  }
+}
+
+function openAlertDetails(alert) {
+  state.selectedAlertId = alert.id;
+  document.querySelectorAll(".alert-card").forEach((card) => {
+    card.classList.toggle("is-selected", card.dataset.alertId === alert.id);
+  });
+
+  if (alert.hasGeometry) state.map?.selectAlert(alert);
+
+  elements.dialog.className = `alert-dialog alert-card--${alert.level}`;
+  elements.dialogSeverity.textContent = capitalize(alert.level);
+  elements.dialogTitle.textContent = alert.event;
+  elements.dialogHeadline.textContent = alert.headline;
+  elements.dialogArea.textContent = alert.area;
+  elements.dialogDescription.textContent = alert.description;
+  elements.dialogInstruction.textContent = alert.instruction;
+  elements.instructionSection.hidden = !alert.instruction;
+  elements.dialogAuthority.textContent = alert.authority;
+  elements.dialogSource.href = alert.sourceUrl;
+  renderDialogMeta(alert);
+
+  if (elements.dialog.open) elements.dialog.close();
+  elements.dialog.showModal();
+}
+
+function renderDialogMeta(alert) {
+  elements.dialogMeta.replaceChildren();
+  const fields = [
+    ["Severity", alert.severity],
+    ["Urgency", alert.urgency],
+    ["Certainty", alert.certainty],
+    ["Expires", formatDateTime(alert.expires)],
+    ["Issued", formatDateTime(alert.sent)],
+    ["Status", alert.status],
+    ["Response", alert.response],
+    ["States", alert.states.join(", ") || "Multi-area"],
+  ];
+
+  fields.forEach(([label, value]) => {
+    const item = createElement("div");
+    item.append(createElement("span", "", label), createElement("strong", "", value));
+    elements.dialogMeta.append(item);
+  });
+}
+
+function clearSelection() {
+  state.selectedAlertId = "";
+  document.querySelectorAll(".alert-card.is-selected").forEach((card) => card.classList.remove("is-selected"));
+  state.map?.clearSelection();
+}
+
+function clearFilters() {
+  state.category = "all";
+  state.severity = "all";
+  state.stateCode = "all";
+  elements.severityFilter.value = "all";
+  elements.stateFilter.value = "all";
+  elements.categoryButtons.forEach((button) => {
+    const active = button.dataset.category === "all";
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  applyFilters();
+  state.map?.resetView();
+}
+
+function populateStateFilter() {
+  const selectedValue = elements.stateFilter.value;
+  const codes = [...new Set(state.alerts.flatMap((alert) => alert.states))].sort((left, right) => {
+    return STATE_NAMES[left].localeCompare(STATE_NAMES[right]);
+  });
+
+  elements.stateFilter.replaceChildren(new Option("All states", "all"));
+  codes.forEach((code) => elements.stateFilter.add(new Option(STATE_NAMES[code], code)));
+  elements.stateFilter.value = codes.includes(selectedValue) ? selectedValue : "all";
+  state.stateCode = elements.stateFilter.value;
+}
+
+function setFeedLoading(isLoading) {
+  elements.alertFeed.setAttribute("aria-busy", String(isLoading));
+  if (!isLoading || state.alerts.length > 0) return;
+
+  elements.alertFeed.hidden = false;
+  elements.emptyState.hidden = true;
+  elements.loadMore.hidden = true;
+  elements.alertFeed.replaceChildren(
+    createElement("div", "alert-card-skeleton"),
+    createElement("div", "alert-card-skeleton"),
+    createElement("div", "alert-card-skeleton"),
+  );
+}
+
+function setRefreshState(isLoading) {
+  elements.refreshButton.classList.toggle("is-loading", isLoading);
+  elements.refreshButton.toggleAttribute("disabled", isLoading);
+  elements.refreshButton.setAttribute("aria-label", isLoading ? "Refreshing active alerts" : "Refresh active alerts");
+}
+
+function setMapState(type, heading, message) {
+  const loader = elements.mapState.querySelector(".map-loader");
+  loader.hidden = type !== "loading";
+  elements.mapState.querySelector("strong").textContent = heading;
+  elements.mapState.querySelector("p").textContent = message;
+  elements.mapState.hidden = false;
+}
+
+function showError(message) {
+  elements.errorText.textContent = message;
+  elements.error.hidden = false;
+}
+
+function hideError() {
+  elements.error.hidden = true;
+}
+
+function announce(message) {
+  elements.liveRegion.textContent = "";
+  window.setTimeout(() => {
+    elements.liveRegion.textContent = message;
+  }, 50);
+}
+
+function formatDateTime(date, { compact = false, timeOnly = false } = {}) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "Not specified";
+
+  const options = timeOnly
+    ? { hour: "numeric", minute: "2-digit", second: "2-digit" }
+    : compact
+      ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
+      : { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" };
+  return new Intl.DateTimeFormat("en-US", options).format(date);
+}
+
+function createElement(tagName, className = "", text = "") {
+  const element = document.createElement(tagName);
+  if (className) element.className = className;
+  if (text !== "") element.textContent = text;
+  return element;
+}
+
+function createSvgUse(reference) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+  use.setAttribute("href", reference);
+  svg.append(use);
+  return svg;
+}
+
+function capitalize(value) {
+  return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : "";
+}
+
+function pluralize(word, count) {
+  return count === 1 ? word : `${word}s`;
+}
+
+setView(window.location.hash === "#storm-center" ? "storm" : "weather", false);
