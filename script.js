@@ -2,7 +2,7 @@
 // directly with the key from config.js — unchanged from before.
 // Production (config.js intentionally not deployed, see .gitignore): fall
 // back to the /api/weather serverless proxy, which holds the key server-side
-// via the WEATHERAPI_KEY Vercel environment variable.
+// via the WEATHER_API_KEY Vercel environment variable.
 const apiKey = window.STORM_CHASER_CONFIG?.weatherApiKey || "";
 const directEndpoint = "https://api.weatherapi.com/v1/forecast.json";
 const proxyEndpoint = "/api/weather";
