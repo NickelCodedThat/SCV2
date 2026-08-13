@@ -44,6 +44,7 @@
       <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></symbol>
       <symbol id="icon-play" viewBox="0 0 24 24"><path d="M6 4v16l13-8Z"></path></symbol>
       <symbol id="icon-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"></rect><rect x="14" y="4" width="4" height="16" rx="1"></rect></symbol>
+      <symbol id="icon-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3a13.5 13.5 0 0 1 3.5 9 13.5 13.5 0 0 1-3.5 9 13.5 13.5 0 0 1-3.5-9A13.5 13.5 0 0 1 12 3Z"></path></symbol>
     </svg>
 
     <div class="weather-app" data-weather="cloudy" data-time="day" data-view="weather">
@@ -81,6 +82,10 @@
           <button class="app-nav__button" id="stormViewButton" type="button" aria-controls="storm-center" aria-pressed="false">
             <svg aria-hidden="true"><use href="#icon-radar"></use></svg>
             Storm Center
+          </button>
+          <button class="app-nav__button" id="liveEarthViewButton" type="button" aria-controls="live-earth" aria-pressed="false">
+            <svg aria-hidden="true"><use href="#icon-globe"></use></svg>
+            Live Earth
           </button>
         </nav>
       </header>
@@ -432,9 +437,137 @@
         <p class="storm-disclaimer">Alert information can change quickly. Follow instructions from local officials and the issuing National Weather Service office.</p>
       </main>
 
+      <main class="storm-center" id="live-earth" hidden>
+        <section class="storm-hero glass-card" aria-labelledby="liveEarthHeading">
+          <div class="storm-hero__content">
+            <p class="eyebrow">Global natural events</p>
+            <h1 id="liveEarthHeading">Live Earth</h1>
+            <p>Significant earthquakes, wildfires, volcanic activity, floods, and tropical cyclones from official sources worldwide.</p>
+          </div>
+          <div class="storm-live-status" aria-live="polite">
+            <span class="live-badge"><i aria-hidden="true"></i> <span id="liveEarthBadgeLabel">Live</span></span>
+            <strong id="liveEarthActiveCount">— Tracked Events</strong>
+            <span><span id="liveEarthUpdatedLabel">Updated</span> <time id="liveEarthLastUpdated">—</time></span>
+            <button class="icon-button" id="refreshLiveEarth" type="button" aria-label="Refresh global events">
+              <svg aria-hidden="true"><use href="#icon-refresh"></use></svg>
+            </button>
+          </div>
+        </section>
+
+        <section class="storm-filters glass-card" aria-labelledby="liveEarthFiltersHeading">
+          <div class="storm-filters__heading">
+            <span><svg aria-hidden="true"><use href="#icon-filter"></use></svg></span>
+            <div>
+              <p class="eyebrow">Refine the map</p>
+              <h2 id="liveEarthFiltersHeading">Event filters</h2>
+            </div>
+          </div>
+
+          <div class="filter-chips" id="liveEarthCategoryFilters" aria-label="Filter events by category">
+            <button class="filter-chip is-active" type="button" data-category="all" aria-pressed="true">All</button>
+            <button class="filter-chip" type="button" data-category="earthquake" aria-pressed="false">Earthquakes</button>
+            <button class="filter-chip" type="button" data-category="wildfire" aria-pressed="false">Fires</button>
+            <button class="filter-chip" type="button" data-category="volcano" aria-pressed="false">Volcanoes</button>
+            <button class="filter-chip" type="button" data-category="flood" aria-pressed="false">Floods</button>
+            <button class="filter-chip" type="button" data-category="cyclone" aria-pressed="false">Cyclones</button>
+          </div>
+
+          <div class="filter-selects">
+            <label>
+              <span>Priority</span>
+              <select id="liveEarthPriorityFilter">
+                <option value="all">All levels</option>
+                <option value="critical">Critical</option>
+                <option value="severe">Significant</option>
+                <option value="elevated">Monitoring</option>
+                <option value="advisory">Informational</option>
+              </select>
+            </label>
+            <label>
+              <span>Recency</span>
+              <select id="liveEarthRecencyFilter">
+                <option value="all">All active</option>
+                <option value="day">Past 24 hours</option>
+                <option value="week">Past 7 days</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <div class="storm-api-status glass-card" id="liveEarthError" role="alert" hidden>
+          <svg aria-hidden="true"><use href="#icon-alert"></use></svg>
+          <div>
+            <strong>Live Earth couldn’t update.</strong>
+            <p id="liveEarthErrorText">One or more sources are temporarily unavailable.</p>
+          </div>
+          <button id="retryLiveEarth" type="button">Try again</button>
+        </div>
+
+        <div class="storm-layout">
+          <section class="storm-map-panel glass-card" aria-labelledby="liveEarthMapHeading">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">USGS · NASA EONET · GDACS · NHC/CPHC</p>
+                <h2 id="liveEarthMapHeading">Global event map</h2>
+              </div>
+              <span class="storm-map-count" id="liveEarthMappedCount">— events</span>
+            </div>
+            <div class="storm-map-wrap">
+              <div class="storm-map" id="liveEarthMap" role="application" aria-label="Interactive global map of significant natural events"></div>
+              <div class="storm-map-state" id="liveEarthMapState">
+                <span class="map-loader" aria-hidden="true"></span>
+                <strong>Preparing the global map</strong>
+                <p>Loading event data from official sources.</p>
+              </div>
+            </div>
+            <div class="severity-legend" aria-label="Map priority legend">
+              <span><i class="severity-dot severity-dot--critical"></i>Critical</span>
+              <span><i class="severity-dot severity-dot--severe"></i>Significant</span>
+              <span><i class="severity-dot severity-dot--elevated"></i>Monitoring</span>
+              <span><i class="severity-dot severity-dot--advisory"></i>Informational</span>
+            </div>
+            <div class="severity-legend" aria-label="Map category legend">
+              <span>● Earthquakes</span>
+              <span>▲ Fires</span>
+              <span>◆ Volcanoes</span>
+              <span>■ Floods</span>
+              <span>⬢ Cyclones</span>
+            </div>
+          </section>
+
+          <section class="alert-feed-panel glass-card" aria-labelledby="liveEarthFeedHeading">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Active events</p>
+                <h2 id="liveEarthFeedHeading">Event feed</h2>
+              </div>
+              <span class="alert-result-count" id="liveEarthResultCount">— results</span>
+            </div>
+
+            <div class="alert-feed" id="liveEarthFeed" aria-busy="true">
+              <div class="alert-card-skeleton"></div>
+              <div class="alert-card-skeleton"></div>
+              <div class="alert-card-skeleton"></div>
+            </div>
+
+            <div class="storm-empty-state" id="liveEarthEmptyState" hidden>
+              <span><svg aria-hidden="true"><use href="#icon-shield"></use></svg></span>
+              <h3 id="liveEarthEmptyHeading">No matching events</h3>
+              <p id="liveEarthEmptyText">Try changing a filter to view other tracked events.</p>
+              <button id="clearLiveEarthFilters" type="button">Clear filters</button>
+            </div>
+
+            <button class="load-more-button" id="loadMoreLiveEarthEvents" type="button" hidden>Load more events</button>
+          </section>
+        </div>
+
+        <p class="storm-disclaimer">Event information is sourced from official providers and can change quickly or be revised. Not all data is real-time — check each event’s “updated” timestamp.</p>
+      </main>
+
       <footer class="footer">
         <p id="weatherAttribution">Weather data by <a href="https://www.weatherapi.com/" target="_blank" rel="noreferrer">WeatherAPI.com</a></p>
         <p id="stormAttribution" hidden>Alert data by <a href="https://www.weather.gov/documentation/services-web-api" target="_blank" rel="noreferrer">NOAA / National Weather Service</a></p>
+        <p id="liveEarthAttribution" hidden>Global event data by <a href="https://earthquake.usgs.gov/" target="_blank" rel="noreferrer">USGS</a>, <a href="https://eonet.gsfc.nasa.gov/" target="_blank" rel="noreferrer">NASA EONET</a>, <a href="https://www.gdacs.org/" target="_blank" rel="noreferrer">GDACS</a>, and <a href="https://www.nhc.noaa.gov/" target="_blank" rel="noreferrer">NOAA/NHC</a></p>
         <p id="liveRegion" class="sr-only" aria-live="polite"></p>
       </footer>
     </div>

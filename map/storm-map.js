@@ -1,9 +1,6 @@
-const MAPLIBRE_VERSION = "5.24.0";
-const MAPLIBRE_SCRIPT = `https://unpkg.com/maplibre-gl@${MAPLIBRE_VERSION}/dist/maplibre-gl.js`;
-const MAPLIBRE_STYLES = `https://unpkg.com/maplibre-gl@${MAPLIBRE_VERSION}/dist/maplibre-gl.css`;
-const EMPTY_COLLECTION = Object.freeze({ type: "FeatureCollection", features: [] });
-
-let mapLibraryPromise;
+import { loadMapLibre, waitForMapLoad } from "./maplibre-loader.js";
+import { EMPTY_COLLECTION, geometryBounds } from "./geo-utils.js";
+import { createBasemapStyle } from "./basemap-style.js";
 
 export async function createStormMap(container, { onAlertSelect } = {}) {
   if (!(container instanceof HTMLElement)) throw new Error("A map container is required.");
@@ -15,33 +12,7 @@ export async function createStormMap(container, { onAlertSelect } = {}) {
 
   const map = new maplibregl.Map({
     container,
-    style: {
-      version: 8,
-      sources: {
-        osm: {
-          type: "raster",
-          tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-          tileSize: 256,
-          maxzoom: 18,
-          attribution: "© OpenStreetMap contributors",
-        },
-      },
-      layers: [
-        { id: "storm-map-background", type: "background", paint: { "background-color": "#101c2a" } },
-        {
-          id: "storm-map-basemap",
-          type: "raster",
-          source: "osm",
-          paint: {
-            "raster-opacity": 0.66,
-            "raster-saturation": -0.82,
-            "raster-contrast": 0.16,
-            "raster-brightness-min": 0.08,
-            "raster-brightness-max": 0.5,
-          },
-        },
-      ],
-    },
+    style: createBasemapStyle({ backgroundLayerId: "storm-map-background", basemapLayerId: "storm-map-basemap" }),
     center: [-98.5, 38.6],
     zoom: 3.15,
     minZoom: 2,
@@ -246,53 +217,6 @@ export async function createStormMap(container, { onAlertSelect } = {}) {
   });
 }
 
-function loadMapLibre() {
-  if (window.maplibregl) return Promise.resolve(window.maplibregl);
-  if (mapLibraryPromise) return mapLibraryPromise;
-
-  mapLibraryPromise = new Promise((resolve, reject) => {
-    if (!document.querySelector(`link[href="${MAPLIBRE_STYLES}"]`)) {
-      const stylesheet = document.createElement("link");
-      stylesheet.rel = "stylesheet";
-      stylesheet.href = MAPLIBRE_STYLES;
-      document.head.append(stylesheet);
-    }
-
-    const existingScript = document.querySelector(`script[src="${MAPLIBRE_SCRIPT}"]`);
-    if (existingScript) {
-      existingScript.addEventListener("load", () => resolve(window.maplibregl), { once: true });
-      existingScript.addEventListener("error", () => reject(new Error("MapLibre could not be loaded.")), { once: true });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = MAPLIBRE_SCRIPT;
-    script.onload = () => resolve(window.maplibregl);
-    script.onerror = () => reject(new Error("MapLibre could not be loaded."));
-    document.head.append(script);
-  });
-
-  return mapLibraryPromise;
-}
-
-function waitForMapLoad(map) {
-  return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => reject(new Error("The map took too long to load.")), 15000);
-
-    map.once("load", () => {
-      window.clearTimeout(timeout);
-      resolve();
-    });
-
-    map.once("error", (event) => {
-      if (!map.loaded()) {
-        window.clearTimeout(timeout);
-        reject(new Error(event.error?.message || "The map could not be initialized."));
-      }
-    });
-  });
-}
-
 function toFeatureCollection(alerts) {
   return {
     type: "FeatureCollection",
@@ -320,39 +244,3 @@ function severityColorExpression() {
   ];
 }
 
-function geometryBounds(geometry) {
-  const points = [];
-  collectCoordinates(geometry.coordinates, points);
-  if (points.length === 0) return null;
-
-  let west = points[0][0];
-  let east = points[0][0];
-  let south = points[0][1];
-  let north = points[0][1];
-
-  points.forEach(([longitude, latitude]) => {
-    west = Math.min(west, longitude);
-    east = Math.max(east, longitude);
-    south = Math.min(south, latitude);
-    north = Math.max(north, latitude);
-  });
-
-  return [[west, south], [east, north]];
-}
-
-function collectCoordinates(coordinates, points) {
-  if (!Array.isArray(coordinates)) return;
-
-  if (
-    coordinates.length >= 2 &&
-    typeof coordinates[0] === "number" &&
-    typeof coordinates[1] === "number" &&
-    Number.isFinite(coordinates[0]) &&
-    Number.isFinite(coordinates[1])
-  ) {
-    points.push(coordinates);
-    return;
-  }
-
-  coordinates.forEach((coordinate) => collectCoordinates(coordinate, points));
-}

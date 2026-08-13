@@ -64,3 +64,16 @@ export function describeTropicalClassification({ classification, intensityKt, of
 
   return Object.freeze({ code, label, category, isMajor, displayName });
 }
+
+/**
+ * Maps a classification (from describeTropicalClassification) onto Storm
+ * Chaser's existing 4-tier severity vocabulary (critical/severe/elevated/
+ * advisory — see styles.css --severity-* tokens), used to color both the
+ * Storm Center tropical cards/map and LIVE EARTH's cyclone events
+ * identically.
+ */
+export function classificationToSeverityTier(classificationInfo) {
+  if (classificationInfo.code === "HU") return classificationInfo.isMajor ? "critical" : "severe";
+  if (classificationInfo.code === "TS" || classificationInfo.code === "STS") return "elevated";
+  return "advisory";
+}
