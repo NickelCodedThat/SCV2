@@ -1271,6 +1271,10 @@ input:focus-visible {
     --page-padding: 1rem;
   }
 
+  .search-form:focus-within {
+    z-index: 10;
+  }
+
   .weather-app {
     padding-top: 1rem;
   }
