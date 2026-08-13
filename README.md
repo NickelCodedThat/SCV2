@@ -160,6 +160,17 @@ window.STORM_CHASER_CONFIG = {
 `config.js` is listed in `.gitignore` and must never be committed. Every
 other data source Storm Chaser uses is public and keyless.
 
+### Production (Vercel)
+
+`config.js` is intentionally never deployed, so the browser has no API key
+in production. Instead, `/api/weather.js` — a small Vercel serverless
+function — holds the key server-side and proxies WeatherAPI requests;
+`script.js` automatically falls back to calling that route whenever no
+client-side key is configured. Set the key as a Vercel project environment
+variable named `WEATHERAPI_KEY` (Project Settings → Environment Variables) —
+it's read server-side only via `process.env` and is never sent to the
+browser. No further configuration or build step is required.
+
 ## Testing
 
 A Node built-in test suite (`node --test`, no external dependencies) covers
