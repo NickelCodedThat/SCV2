@@ -1,5 +1,4 @@
-# Local API configuration and environment files
-config.js
+# Local environment files
 .env
 .env.*
 !.env.example

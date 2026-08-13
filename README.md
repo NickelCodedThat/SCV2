@@ -2,17 +2,15 @@
 
 Storm Chaser is a weather intelligence dashboard: a local forecast, a U.S.
 severe-weather center, and a live global feed of significant natural events,
-all built from official public data sources. A single serverless endpoint keeps
-the WeatherAPI credential out of production browsers; all keyless providers
-remain direct client-side integrations.
+all built from public government, scientific, and meteorological data sources.
 
-It's a no-build, vanilla JavaScript app — every screen is plain HTML/CSS/ES
-modules, with one small Vercel function as the production WeatherAPI boundary.
+It's a static, no-build, vanilla JavaScript app — every screen is plain
+HTML/CSS/ES modules calling keyless public APIs directly from the browser.
 
 ## Core features
 
 **Weather**
-- Live current conditions and location search powered by WeatherAPI
+- Live current conditions and location search powered by Open-Meteo
 - Hourly and three-day forecasts, sunrise/sunset, moon phase
 - Dynamic day/night and condition-aware atmosphere
 
@@ -52,7 +50,7 @@ modules, with one small Vercel function as the production WeatherAPI boundary.
 - [MapLibre GL JS](https://maplibre.org/) for all interactive maps
 - [Node's built-in test runner](https://nodejs.org/api/test.html) — zero
   external test dependencies
-- [WeatherAPI](https://www.weatherapi.com/), NOAA/NWS, NOAA nowCOAST, the
+- [Open-Meteo](https://open-meteo.com/), NOAA/NWS, NOAA nowCOAST, the
   National Hurricane Center, USGS, NASA EONET, and GDACS for data
 
 ## Architecture
@@ -95,7 +93,7 @@ accounts and no server-side state.
 
 ## Data sources
 
-- Local weather: [WeatherAPI](https://www.weatherapi.com/)
+- Local weather and geocoding: [Open-Meteo](https://open-meteo.com/)
 - U.S. alerts: [NOAA/National Weather Service](https://www.weather.gov/documentation/services-web-api)
 - Radar: [NOAA/NWS nowCOAST](https://nowcoast.noaa.gov/) (NEXRAD/MRMS CONUS base reflectivity mosaic)
 - Tropical tracking: [NOAA's tropical summary MapServer](https://mapservices.weather.noaa.gov/tropical/rest/services/tropical/NHC_tropical_weather_summary/MapServer) (National Hurricane Center / Central Pacific Hurricane Center data)
@@ -104,9 +102,10 @@ accounts and no server-side state.
 - Floods: [GDACS](https://www.gdacs.org/) (Global Disaster Alert and Coordination System)
 - Basemap: [OpenStreetMap](https://www.openstreetmap.org/); Live Earth's cluster-count labels use [MapLibre's public demo glyph service](https://demotiles.maplibre.org/) (non-critical — category markers render without it)
 
-With the exception of WeatherAPI, the sources above are public, keyless
-government or institutional endpoints that Storm Chaser calls directly from
-the browser. WeatherAPI requests use the serverless proxy described below.
+All sources above are public, keyless endpoints that Storm Chaser calls
+directly from the browser. The Weather view normalizes Open-Meteo's geocoding
+and forecast responses behind `services/open-meteo-weather.js`, preserving a
+provider-independent rendering boundary.
 
 ## Reliability
 
@@ -145,44 +144,20 @@ Open `http://127.0.0.1:4173` in a browser.
 
 ### Environment / configuration
 
-The only credential the app needs is a WeatherAPI key, kept out of Git:
-
-```bash
-cp config.example.js config.js
-```
-
-Then edit `config.js`:
-
-```js
-window.STORM_CHASER_CONFIG = {
-  weatherApiKey: "YOUR_WEATHERAPI_KEY",
-};
-```
-
-`config.js` is listed in `.gitignore` and must never be committed. Every
-other data source Storm Chaser uses is public and keyless.
+No API keys or environment variables are required. All V1 data sources are
+public and keyless.
 
 ### Production (Vercel)
 
-`config.js` is intentionally never deployed, so the browser has no API key
-in production. Instead, `/api/weather.js` — a small Vercel serverless
-function — holds the key server-side and proxies WeatherAPI requests;
-`script.js` automatically falls back to calling that route whenever no
-client-side key is configured. Set the key as a Vercel project environment
-variable named `WEATHER_API_KEY` (Project Settings → Environment Variables).
-Enable it for **Production** and for **Preview** if preview deployments should
-also have working weather data, save the setting, then redeploy so the new
-deployment receives it. The value is read server-side only via `process.env`
-and is never sent to the browser. The older `WEATHERAPI_KEY` spelling remains
-supported as a temporary compatibility alias, but `WEATHER_API_KEY` is the
-documented canonical name. No build step or `vercel.json` is required.
+Storm Chaser deploys as static files. Vercel requires no build command,
+serverless weather function, or Weather environment variable.
 
 ## Testing
 
 A Node built-in test suite (`node --test`, no external dependencies) covers
-pure logic across the app: hurricane classification, NHC/radar parsing,
-event normalization, URL state helpers, search/sort, and the saved-events
-watchlist (including corrupt-storage and quota-exceeded edge cases).
+pure logic across the app: Open-Meteo normalization and weather-code mapping,
+hurricane classification, NHC/radar parsing, event normalization, URL state
+helpers, search/sort, and the saved-events watchlist.
 
 ```bash
 npm test
