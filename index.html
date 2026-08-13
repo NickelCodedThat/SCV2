@@ -42,6 +42,8 @@
       <symbol id="icon-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"></path></symbol>
       <symbol id="icon-external" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path></symbol>
       <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></symbol>
+      <symbol id="icon-play" viewBox="0 0 24 24"><path d="M6 4v16l13-8Z"></path></symbol>
+      <symbol id="icon-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"></rect><rect x="14" y="4" width="4" height="16" rx="1"></rect></symbol>
     </svg>
 
     <div class="weather-app" data-weather="cloudy" data-time="day" data-view="weather">
@@ -258,16 +260,24 @@
             <p>Official watches, warnings, and advisories issued by the National Weather Service.</p>
           </div>
           <div class="storm-live-status" aria-live="polite">
-            <span class="live-badge"><i aria-hidden="true"></i> Live</span>
+            <span class="live-badge"><i aria-hidden="true"></i> <span id="stormLiveBadgeLabel">Live</span></span>
             <strong id="activeAlertCount">— Active Alerts</strong>
-            <span>Updated <time id="stormLastUpdated">—</time></span>
+            <span><span id="stormUpdatedLabel">Updated</span> <time id="stormLastUpdated">—</time></span>
             <button class="icon-button" id="refreshStormCenter" type="button" aria-label="Refresh active alerts">
               <svg aria-hidden="true"><use href="#icon-refresh"></use></svg>
             </button>
           </div>
         </section>
 
-        <section class="storm-filters glass-card" aria-labelledby="stormFiltersHeading">
+        <nav class="storm-subview-tabs glass-card" aria-label="Storm Center sections">
+          <div class="filter-chips" id="stormSubviewTabs" aria-label="Storm Center view">
+            <button class="filter-chip is-active" type="button" data-subview="alerts" aria-pressed="true">Alerts</button>
+            <button class="filter-chip" type="button" data-subview="radar" aria-pressed="false">Radar</button>
+            <button class="filter-chip" type="button" data-subview="tropical" aria-pressed="false">Tropical</button>
+          </div>
+        </nav>
+
+        <section class="storm-filters glass-card" aria-labelledby="stormFiltersHeading" id="alertFiltersSection">
           <div class="storm-filters__heading">
             <span><svg aria-hidden="true"><use href="#icon-filter"></use></svg></span>
             <div>
@@ -321,7 +331,7 @@
           <section class="storm-map-panel glass-card" aria-labelledby="stormMapHeading">
             <div class="section-heading">
               <div>
-                <p class="eyebrow">Official alert geometry</p>
+                <p class="eyebrow" id="stormMapEyebrow">Official alert geometry</p>
                 <h2 id="stormMapHeading">U.S. storm map</h2>
               </div>
               <span class="storm-map-count" id="mappedAlertCount">— mapped</span>
@@ -334,7 +344,7 @@
                 <p>Loading official alert geometry.</p>
               </div>
             </div>
-            <div class="severity-legend" aria-label="Map alert severity legend">
+            <div class="severity-legend" id="severityLegend" aria-label="Map alert severity legend">
               <span><i class="severity-dot severity-dot--critical"></i>Critical</span>
               <span><i class="severity-dot severity-dot--severe"></i>Severe</span>
               <span><i class="severity-dot severity-dot--elevated"></i>Elevated</span>
@@ -342,30 +352,81 @@
             </div>
           </section>
 
-          <section class="alert-feed-panel glass-card" aria-labelledby="alertFeedHeading">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">Active events</p>
-                <h2 id="alertFeedHeading">National alert feed</h2>
+          <div class="storm-side-panel">
+            <section class="alert-feed-panel glass-card" id="alertsPanel" aria-labelledby="alertFeedHeading">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Active events</p>
+                  <h2 id="alertFeedHeading">National alert feed</h2>
+                </div>
+                <span class="alert-result-count" id="alertResultCount">— results</span>
               </div>
-              <span class="alert-result-count" id="alertResultCount">— results</span>
-            </div>
 
-            <div class="alert-feed" id="alertFeed" aria-busy="true">
-              <div class="alert-card-skeleton"></div>
-              <div class="alert-card-skeleton"></div>
-              <div class="alert-card-skeleton"></div>
-            </div>
+              <div class="alert-feed" id="alertFeed" aria-busy="true">
+                <div class="alert-card-skeleton"></div>
+                <div class="alert-card-skeleton"></div>
+                <div class="alert-card-skeleton"></div>
+              </div>
 
-            <div class="storm-empty-state" id="stormEmptyState" hidden>
-              <span><svg aria-hidden="true"><use href="#icon-shield"></use></svg></span>
-              <h3 id="stormEmptyHeading">No matching active alerts</h3>
-              <p id="stormEmptyText">Try changing a filter to view other National Weather Service events.</p>
-              <button id="clearStormFilters" type="button">Clear filters</button>
-            </div>
+              <div class="storm-empty-state" id="stormEmptyState" hidden>
+                <span><svg aria-hidden="true"><use href="#icon-shield"></use></svg></span>
+                <h3 id="stormEmptyHeading">No matching active alerts</h3>
+                <p id="stormEmptyText">Try changing a filter to view other National Weather Service events.</p>
+                <button id="clearStormFilters" type="button">Clear filters</button>
+              </div>
 
-            <button class="load-more-button" id="loadMoreAlerts" type="button" hidden>Load more alerts</button>
-          </section>
+              <button class="load-more-button" id="loadMoreAlerts" type="button" hidden>Load more alerts</button>
+            </section>
+
+            <section class="alert-feed-panel glass-card" id="radarPanel" aria-labelledby="radarPanelHeading" hidden>
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">NOAA / NWS nowCOAST</p>
+                  <h2 id="radarPanelHeading">Radar playback</h2>
+                </div>
+                <span class="alert-result-count" id="radarFrameCount">— frames</span>
+              </div>
+
+              <p class="radar-status" id="radarStatus">Loading radar frames…</p>
+
+              <div class="radar-playback" id="radarPlayback">
+                <button class="icon-button icon-button--prev" id="radarPrevFrame" type="button" aria-label="Previous radar frame" disabled>
+                  <svg aria-hidden="true"><use href="#icon-chevron"></use></svg>
+                </button>
+                <button class="icon-button" id="radarPlayPause" type="button" aria-label="Play radar animation" aria-pressed="false" disabled>
+                  <svg aria-hidden="true"><use href="#icon-play" id="radarPlayPauseIcon"></use></svg>
+                </button>
+                <button class="icon-button" id="radarNextFrame" type="button" aria-label="Next radar frame" disabled>
+                  <svg aria-hidden="true"><use href="#icon-chevron"></use></svg>
+                </button>
+                <label class="sr-only" for="radarTimeline">Radar frame timeline</label>
+                <input type="range" id="radarTimeline" class="radar-timeline" min="0" max="0" value="0" step="1" disabled>
+              </div>
+
+              <p class="storm-disclaimer">Base reflectivity mosaic from NOAA/NWS nowCOAST (NEXRAD &amp; MRMS). Frames refresh automatically while this tab is open.</p>
+            </section>
+
+            <section class="alert-feed-panel glass-card" id="tropicalPanel" aria-labelledby="tropicalPanelHeading" hidden>
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">NHC / CPHC advisories</p>
+                  <h2 id="tropicalPanelHeading">Tropical systems</h2>
+                </div>
+                <span class="alert-result-count" id="tropicalResultCount">— active</span>
+              </div>
+
+              <div class="alert-feed" id="tropicalFeed" aria-busy="true">
+                <div class="alert-card-skeleton"></div>
+                <div class="alert-card-skeleton"></div>
+              </div>
+
+              <div class="storm-empty-state" id="tropicalEmptyState" hidden>
+                <span><svg aria-hidden="true"><use href="#icon-shield"></use></svg></span>
+                <h3>No active tropical systems</h3>
+                <p>The National Hurricane Center is not currently tracking any active storms in the Atlantic, Eastern Pacific, or Central Pacific basins.</p>
+              </div>
+            </section>
+          </div>
         </div>
 
         <p class="storm-disclaimer">Alert information can change quickly. Follow instructions from local officials and the issuing National Weather Service office.</p>
@@ -382,7 +443,7 @@
       <div class="alert-dialog__header">
         <div>
           <span class="severity-badge" id="alertDialogSeverity">Advisory</span>
-          <p class="eyebrow">Official NWS alert</p>
+          <p class="eyebrow" id="alertDialogEyebrow">Official NWS alert</p>
         </div>
         <button class="icon-button" id="closeAlertDialog" type="button" aria-label="Close alert details">
           <svg aria-hidden="true"><use href="#icon-x"></use></svg>
@@ -393,15 +454,15 @@
         <p class="alert-dialog__headline" id="alertDialogHeadline"></p>
         <div class="alert-dialog__meta" id="alertDialogMeta"></div>
         <section>
-          <h3>Affected area</h3>
+          <h3 id="alertDialogAreaHeading">Affected area</h3>
           <p id="alertDialogArea"></p>
         </section>
         <section>
-          <h3>Description</h3>
+          <h3 id="alertDialogDescriptionHeading">Description</h3>
           <p class="preserve-lines" id="alertDialogDescription"></p>
         </section>
         <section id="alertInstructionSection">
-          <h3>Recommended action</h3>
+          <h3 id="alertDialogInstructionHeading">Recommended action</h3>
           <p class="preserve-lines" id="alertDialogInstruction"></p>
         </section>
       </div>

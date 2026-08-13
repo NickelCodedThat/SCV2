@@ -2179,6 +2179,56 @@ input:focus-visible {
   line-height: 1.5;
 }
 
+/* Phase 3 — Radar & Tropical (additive only; reuses existing tokens/components) */
+
+.storm-subview-tabs {
+  padding: 0.85rem 1.15rem;
+}
+
+.storm-side-panel {
+  display: contents;
+}
+
+.storm-filters[hidden],
+.alert-feed-panel[hidden] {
+  display: none;
+}
+
+.icon-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.icon-button--prev svg {
+  transform: rotate(180deg);
+}
+
+.radar-status {
+  margin: 0.9rem 0 0;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+}
+
+.radar-playback {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.radar-timeline {
+  flex: 1;
+  min-width: 0;
+  height: 1.6rem;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.radar-timeline:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .alert-dialog {
   --severity-critical: #ff7f86;
   --severity-critical-rgb: 255, 127, 134;
